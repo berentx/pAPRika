@@ -105,6 +105,11 @@ def run(args):
         logger.info(f"Running production in window {window}...")
         print(f"Running production in window {window}...")
 
+        # Load XML and input coordinates
+        with open(os.path.join(folder, 'system.xml'), 'r') as file:
+            system = openmm.XmlSerializer.deserialize(file.read())
+        coords = app.PDBFile(os.path.join(folder, 'minimized.pdb'))
+
         # Integrator
         integrator = openmm.LangevinIntegrator(300 * unit.kelvin, 1.0 / unit.picoseconds, 2.0 * unit.femtoseconds)
 
@@ -125,7 +130,7 @@ def run(args):
         simulation.context.setPositions(coords.positions)
         simulation.reporters.append(dcd_reporter)
         simulation.reporters.append(state_reporter)
-        with open('equilibration.rst', 'r') as f:
+        with open(os.path.join(folder, 'equilibration.rst'), 'r') as f:
             simulation.context.setState(XmlSerializer.deserialize(f.read()))
     
         # MD steps
