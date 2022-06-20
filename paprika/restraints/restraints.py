@@ -709,6 +709,7 @@ class DAT_restraint(object):
 
         elif (
             self.pull["target_increment"] is not None
+
             and self.pull["target_final"] is not None
         ):
             if self.pull["target_initial"] is not None:

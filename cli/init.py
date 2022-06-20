@@ -213,8 +213,8 @@ def init(args):
     structure = pmd.load_file('complex/vac.prmtop', 'complex/vac.rst7', structure=True)
 
     aligned_structure = align.zalign(structure, G1, G2)
-    aligned_structure.save("complex/aligned.prmtop", overwrite=True)
-    aligned_structure.save("complex/aligned.rst7", overwrite=True)
+    aligned_structure.save(str(system_path/"aligned.prmtop"), overwrite=True)
+    aligned_structure.save(str(system_path/"aligned.rst7"), overwrite=True)
 
     logger.info('add dummy atoms')
 
@@ -258,6 +258,14 @@ def init(args):
     windows = [len(attach_fractions), len(pull_distances), len(release_fractions)]
     print(f"There are {windows} windows in this attach-pull-release calculation.")
 
+    # compute host anchor atoms
+
+    structure = pmd.load_file("complex/apr.prmtop", "complex/apr.rst7")
+    structure.save("complex/apr_pmd.pdb", overwrite=True)
+    host_mol = Chem.MolFromPDBFile(str(system_path/"apr_pmd.pdb"), removeHs=False)
+    p_monomer = Chem.MolFromSmarts("O1C(O)CCCC1")
+    monomers = host_mol.GetSubstructMatches(p_monomer)
+
     if args.h1 and args.h2 and args.h3:
         H1 = f":{hostname.upper()}@{args.h1}"
         H2 = f":{hostname.upper()}@{args.h2}"
@@ -265,7 +273,9 @@ def init(args):
     else:
         H1 = f":{hostname.upper()}@{monomers[0][1]+1}"
         H2 = f":{hostname.upper()}@{monomers[2][1]+1}"
-        H3 = f":{hostname.upper()}@{monomers[-3][1]+1}"
+        H3 = f":{hostname.upper()}@{monomers[-2][1]+1}"
+
+    print(H1, H2, H3)
 
     D1 = ":DM1"
     D2 = ":DM2"
@@ -290,7 +300,7 @@ def init(args):
         C4n = f":{hostname.upper()}@{monomers[j][5]+1}"
         C5n = f":{hostname.upper()}@{monomers[j][6]+1}"
 
-        #print(O5, C1, O1, C4n, C5n)
+        print(O5, C1, O1, C4n, C5n)
 
         r = restraints.DAT_restraint()
         r.mask1 = O5
