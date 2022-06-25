@@ -100,7 +100,7 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
     assert Path(system_pdb).exists()
 
 
-def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, dummy=True):
+def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, conc, dummy=True):
     from paprika.build.system import TLeap
 
     system = TLeap()
@@ -108,8 +108,9 @@ def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, dummy=Tr
     system.pbc_type = PBCBox.rectangular
     system.neutralize = True
     system.output_prefix = system_prefix
-    system.target_waters = 3000
-    system.add_ions = ["Na+", 6, "Cl-", 6]
+    system.target_waters = 2500
+    n_ions = int(conc / 55.0 * system.target_waters)
+    system.add_ions = ["Na+", n_ions, "Cl-", n_ions]
 
     host_dir = Path(info['host']['par_path']).resolve()
     host_name = info['host']['name']
@@ -222,9 +223,10 @@ def init(args):
                               "complex/aligned.rst7",
                               structure=True)
 
-    structure = dummy.add_dummy(structure, residue_name="DM1", z=-6.0)
-    structure = dummy.add_dummy(structure, residue_name="DM2", z=-9.0)
-    structure = dummy.add_dummy(structure, residue_name="DM3", z=-11.2, y=2.2)
+    d0 = args.d0
+    structure = dummy.add_dummy(structure, residue_name="DM1", z=d0)
+    structure = dummy.add_dummy(structure, residue_name="DM2", z=d0-3)
+    structure = dummy.add_dummy(structure, residue_name="DM3", z=d0-5.2, y=2.2)
 
     structure.save("complex/aligned_with_dummy.prmtop", overwrite=True)
     structure.save("complex/aligned_with_dummy.rst7", overwrite=True)
@@ -251,10 +253,13 @@ def init(args):
 
     initial_distance = args.r0
     final_distance = args.r1 
-    offset = 0.5
+    offset = args.offset
+    k_dist = args.k_dist
     pull_distances = np.arange(initial_distance, final_distance+offset, offset)
 
-    release_fractions = attach_fractions[::-1]
+    release_string = "0.00 0.40 0.80 2.40 5.50 11.80 24.40 49.60 74.80 100.00"
+    release_fractions = [float(i) / 100 for i in release_string.split()][::-1]
+    #release_fractions = attach_fractions[::-1]
     windows = [len(attach_fractions), len(pull_distances), len(release_fractions)]
     print(f"There are {windows} windows in this attach-pull-release calculation.")
 
@@ -351,7 +356,6 @@ def init(args):
         host_restraints.append(r)
 
 
-
     guest_restraints = []
 
     r = restraints.DAT_restraint()
@@ -361,17 +365,16 @@ def init(args):
     r.auto_apr = True
     r.continuous_apr = True
     r.amber_index = False
-    k_dist = 10.0
     
-    r.attach["target"] = 6.0                            # Angstroms
+    r.attach["target"] = initial_distance               # Angstroms
     r.attach["fraction_list"] = attach_fractions
     r.attach["fc_final"] = k_dist                       # kcal/mol/Angstroms**2
     
     r.pull["fc"] = k_dist                               # kcal/mol/Angstroms**2
-    r.pull["target_final"] = args.r1                    # Angstroms
+    r.pull["target_final"] = final_distance             # Angstroms
     r.pull["num_windows"] = windows[1]
 
-    r.release["target"] = args.r1
+    r.release["target"] = final_distance
     r.release["fraction_list"] = [1.0] * len(release_fractions)
     r.release["fc_final"] = k_dist
     
@@ -431,39 +434,40 @@ def init(args):
 
     host_guest_restraints = (static_restraints + host_restraints + guest_restraints)
     for window in window_list:
-        with open(f"windows/{window}/disang.rest", "w") as file:
+        folder = Path(f'windows/{window}')
+        with open(folder/"disang.rest", "w") as file:
             for restraint in host_guest_restraints:
                 string = amber_restraint_line(restraint, window)
                 if string is not None:
                     file.write(string)
 
     for window in window_list:
-        folder = f'windows/{window}'
+        folder = Path(f'windows/{window}')
         window_number, phase = parse_window(window)
 
         if window[0] == "a":
-            shutil.copy("complex/apr.prmtop", f"{folder}/apr.prmtop")
-            shutil.copy("complex/apr.rst7", f"{folder}/apr.rst7")
+            shutil.copy("complex/apr.prmtop", folder/"apr.prmtop")
+            shutil.copy("complex/apr.rst7", folder/"apr.rst7")
 
         elif window[0] == "p":
             structure = pmd.load_file("complex/apr.prmtop", "complex/apr.rst7", structure = True)
-            target_difference = guest_restraints[0].phase['pull']['targets'][int(window[1:])].magnitude - 6.0
+            target_difference = guest_restraints[0].phase['pull']['targets'][int(window[1:])].magnitude + d0
 
             for atom in structure.atoms:
                 if atom.residue.name == guestname.upper():
                     atom.xz += target_difference
-            structure.save(f"windows/{window}/apr.prmtop", overwrite=True)
-            structure.save(f"windows/{window}/apr.rst7", overwrite=True)
+            structure.save(str(folder/"apr.prmtop"), overwrite=True)
+            structure.save(str(folder/"apr.rst7"), overwrite=True)
 
         elif window[0] == "r":
             structure = pmd.load_file("complex/apr.prmtop", "complex/apr.rst7", structure = True)
-            target_difference = args.r1 - 6.0
+            target_difference = final_distance + d0
 
             for atom in structure.atoms:
                 if atom.residue.name == guestname.upper():
                     atom.xz += target_difference
-            structure.save(f"windows/{window}/apr.prmtop", overwrite=True)
-            structure.save(f"windows/{window}/apr.rst7", overwrite=True)
+            structure.save(str(folder/"apr.prmtop"), overwrite=True)
+            structure.save(str(folder/"apr.rst7"), overwrite=True)
 
         prefix = 'apr'
 
@@ -471,28 +475,40 @@ def init(args):
         if not args.implicit:
             print(f"Solvating system in window {window}.")
             prefix = 'apr-solvated'
-            structure = pmd.load_file(f"windows/{window}/apr.prmtop",
-                                      f"windows/{window}/apr.rst7")
-            structure.save(f"windows/{window}/apr.pdb", overwrite=True)
-            solvate(info, f"windows/{window}/apr.pdb", 'complex', f'windows/{window}', prefix)
+            structure = pmd.load_file(str(folder/"apr.prmtop"), str(folder/"apr.rst7"))
+            structure.save(str(folder/"apr.pdb"), overwrite=True)
+            solvate(info, str(folder/"apr.pdb"), 'complex', folder, prefix, conc=(args.conc/1000.0))
 
         # Load Amber
-        prmtop = app.AmberPrmtopFile(f'{folder}/{prefix}.prmtop')
-        inpcrd = app.AmberInpcrdFile(f'{folder}/{prefix}.rst7')
+        prmtop = app.AmberPrmtopFile(str(folder/f'{prefix}.prmtop'))
+        inpcrd = app.AmberInpcrdFile(str(folder/f'{prefix}.rst7'))
 
         # Create PDB file
-        with open(os.path.join(folder, 'system.pdb'), 'w') as file:
+        with open(folder/'system.pdb', 'w') as file:
             app.PDBFile.writeFile(prmtop.topology, inpcrd.positions, file, keepIds=True)
 
         # Create an OpenMM system from the Amber topology
-        system = prmtop.createSystem(
-            nonbondedMethod=app.NoCutoff,
-            constraints=app.HBonds,
-            implicitSolvent=app.HCT,
-        )
+        if not args.implicit:
+            for line in open(folder/'system.pdb'):
+                if line.startswith("CRYST1"):
+                    boxx, boxy, boxz = list(map(float, line.split()[1:4]))
+                    break
+
+            system = prmtop.createSystem(
+                nonbondedMethod=app.PME,
+                nonbondedCutoff=8.0*unit.angstroms,
+                constraints=app.HBonds,
+            )
+
+        else:
+            system = prmtop.createSystem(
+                nonbondedMethod=app.NoCutoff,
+                constraints=app.HBonds,
+                implicitSolvent=app.HCT,
+            )
 
         # Apply positional restraints on the dummy atoms
-        apply_positional_restraints(os.path.join(folder, 'system.pdb'), system, force_group=15)
+        apply_positional_restraints(str(folder/'system.pdb'), system, force_group=15)
 
         # Apply host static restraints
         for restraint in static_restraints:
@@ -508,7 +524,7 @@ def init(args):
 
         # Save OpenMM system to XML file
         system_xml = openmm.XmlSerializer.serialize(system)
-        with open(os.path.join(folder, 'system.xml'), 'w') as file:
+        with open(folder/'system.xml', 'w') as file:
             file.write(system_xml)
 
     save_restraints(host_guest_restraints, filepath="windows/restraints.json")
