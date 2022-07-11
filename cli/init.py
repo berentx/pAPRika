@@ -65,19 +65,24 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
 
     host_dir = Path(info['host']['par_path']).resolve()
     host_name = info['host']['name']
-    guest_dir = Path(info['guest']['par_path']).resolve()
-    guest_name = info['guest']['name']
     
     system.template_lines = [
         "source leaprc.gaff2",
+        "source leaprc.lipid21",
     ]
 
     system.template_lines += [
         f"loadamberparams {host_dir}/{host_name}.frcmod",
-        f"loadamberparams {guest_dir}/{guest_name}.frcmod",
         f"{host_name.upper()} = loadmol2 {host_dir}/{host_name}.gaff2.mol2",
-        f"{guest_name.upper()} = loadmol2 {guest_dir}/{guest_name}.gaff2.mol2",
     ]
+
+    if info['guest']['par_path'] != 'None':
+        guest_dir = Path(info['guest']['par_path']).resolve()
+        guest_name = info['guest']['name']
+        system.template_lines += [
+            f"loadamberparams {guest_dir}/{guest_name}.frcmod",
+            f"{guest_name.upper()} = loadmol2 {guest_dir}/{guest_name}.gaff2.mol2",
+        ]
 
     if dummy:
         system.template_lines += [
@@ -100,7 +105,7 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
     assert Path(system_pdb).exists()
 
 
-def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, conc, dummy=True):
+def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, num_waters, ion_conc, dummy=True):
     from paprika.build.system import TLeap
 
     system = TLeap()
@@ -108,8 +113,11 @@ def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, conc, du
     system.pbc_type = PBCBox.rectangular
     system.neutralize = True
     system.output_prefix = system_prefix
-    system.target_waters = 2500
-    n_ions = int(conc / 55.0 * system.target_waters)
+    system.target_waters = num_waters
+    #system.set_water_model("tip3p", model_type="force-balance")
+    system.set_water_model("tip3p")
+
+    n_ions = int(ion_conc / 55.0 * system.target_waters)
     system.add_ions = ["Na+", n_ions, "Cl-", n_ions]
 
     host_dir = Path(info['host']['par_path']).resolve()
@@ -121,15 +129,22 @@ def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, conc, du
     
     system.template_lines = [
         "source leaprc.gaff2",
-        "source leaprc.water.tip3p",
+        "source leaprc.lipid21",
+        #"source leaprc.water.tip3p",
     ]
 
     system.template_lines += [
         f"loadamberparams {host_dir}/{host_name}.frcmod",
-        f"loadamberparams {guest_dir}/{guest_name}.frcmod",
         f"{host_name.upper()} = loadmol2 {host_dir}/{host_name}.gaff2.mol2",
-        f"{guest_name.upper()} = loadmol2 {guest_dir}/{guest_name}.gaff2.mol2",
     ]
+
+    if info['guest']['par_path'] != 'None':
+        guest_dir = Path(info['guest']['par_path']).resolve()
+        guest_name = info['guest']['name']
+        system.template_lines += [
+            f"loadamberparams {guest_dir}/{guest_name}.frcmod",
+            f"{guest_name.upper()} = loadmol2 {guest_dir}/{guest_name}.gaff2.mol2",
+        ]
 
     if dummy:
         system.template_lines += [
@@ -171,10 +186,14 @@ def init(args):
     logger.info('preparing guest parameters')
 
     guestname = guest.stem
-    guest_par_path = Path(guestname)
-    guest_top = guest_par_path/f'{guestname}.prmtop'
-    if not guest_top.exists():
-        antechamber(guest, 'mol2', guest_par_path, overwrite=args.overwrite)
+    if guestname.upper() == 'CHL':
+        guest_par_path = None
+        guest_top = None
+    else:
+        guest_par_path = Path(guestname)
+        guest_top = guest_par_path/f'{guestname}.prmtop'
+        if not guest_top.exists():
+            antechamber(guest, 'mol2', guest_par_path, overwrite=args.overwrite)
 
     info = {
         'host': {
@@ -477,7 +496,7 @@ def init(args):
             prefix = 'apr-solvated'
             structure = pmd.load_file(str(folder/"apr.prmtop"), str(folder/"apr.rst7"))
             structure.save(str(folder/"apr.pdb"), overwrite=True)
-            solvate(info, str(folder/"apr.pdb"), 'complex', folder, prefix, conc=(args.conc/1000.0))
+            solvate(info, str(folder/"apr.pdb"), 'complex', folder, prefix, num_waters=args.nwater, ion_conc=(args.conc/1000.0))
 
         # Load Amber
         prmtop = app.AmberPrmtopFile(str(folder/f'{prefix}.prmtop'))
@@ -496,7 +515,7 @@ def init(args):
 
             system = prmtop.createSystem(
                 nonbondedMethod=app.PME,
-                nonbondedCutoff=8.0*unit.angstroms,
+                nonbondedCutoff=9.0*unit.angstroms,
                 constraints=app.HBonds,
             )
 
