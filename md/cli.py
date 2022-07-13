@@ -43,7 +43,6 @@ def main():
     if args.verbose:
         logging.basicConfig(level=logging.DEBUG)
 
-    args.func(args)
     try:
         args.func(args)
     except Exception as e:
