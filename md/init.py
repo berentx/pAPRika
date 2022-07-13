@@ -3,7 +3,7 @@ import logging
 import os
 from pathlib import Path
 import shutil
- 
+
 def antechamber(input, format, output_path, pl=-1, overwrite=False):
     output_mol2 = f'{input.stem}.gaff2.mol2'
     output_frcmod = f'{input.stem}.frcmod'
@@ -51,7 +51,7 @@ def build(info, system_path, system_top, system_rst, system_pdb, dummy=False):
     
         system.template_lines += [
             f"loadamberparams {host_dir}/{host_name}.frcmod",
-            f"model = loadmol2 {host_dir}/{host_name}.gaff2.mol2",
+            f"MOL = loadmol2 {host_dir}/{host_name}.gaff2.mol2",
         ]
 
     if 'guest' in info:
@@ -61,14 +61,28 @@ def build(info, system_path, system_top, system_rst, system_pdb, dummy=False):
         if info['guest']['par_path'] != 'None':
             system.template_lines += [
                 f"loadamberparams {guest_dir}/{guest_name}.frcmod",
-                f"model = loadmol2 {guest_dir}/{guest_name}.gaff2.mol2",
+                f"LIG = loadmol2 {guest_dir}/{guest_name}.gaff2.mol2",
             ]
         else:
             guest_file = Path(info['guest']['file']).resolve()
             ext = guest_file.suffix[1:]
             system.template_lines += [
-                f"model = load{ext} {guest_file}",
+                f"LIG = load{ext} {guest_file}",
             ]
+
+    if 'complex' in info:
+        complex_file = Path(info['complex']['file']).resolve()
+        ext = complex_file.suffix[1:]
+        system.template_lines += [
+            f"model = load{ext} {complex_file}",
+        ]
+    else:
+        if args.host and args.guest:
+            system.template_lines += [ f"model = combine {{ host guest }}", ]
+        elif args.host:
+            system.template_lines += [ f"model = host", ]
+        else:
+            system.template_lines += [ f"model = guest", ]
 
     system.template_lines += [
         "check model",
@@ -84,6 +98,7 @@ def build(info, system_path, system_top, system_rst, system_pdb, dummy=False):
 
 def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, num_waters, ion_conc, dummy=True):
     from paprika.build.system import TLeap
+    from paprika.build.system.utils import PBCBox
 
     system = TLeap()
     system.output_path = system_path
@@ -148,7 +163,6 @@ def init(args):
     
     from paprika.build import align
     from paprika.build import dummy
-    from paprika.build.system.utils import PBCBox
     from paprika import restraints
     from paprika.io import save_restraints
     from paprika.restraints.restraints import create_window_list
@@ -199,6 +213,15 @@ def init(args):
             'par_path': str(guest_par_path),
             'top': str(guest_top),
         }
+
+    if args.complex:
+        logger.info('loading complex')
+        complex = Path(args.complex)
+
+        info['complex'] = {
+            'file': str(args.complex),
+        }
+
 
     if not args.host and not args.guest:
         raise ValueError('At least host or guest parameter is required')

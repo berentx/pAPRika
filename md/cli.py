@@ -14,13 +14,14 @@ logging.basicConfig(level=logging.WARNING)
 
 def main():
     parser = argparse.ArgumentParser(description='setup parprika simulations', add_help=False)
-    parser.add_argument('--verbose', action='store_true', help='complex PDB file')
+    parser.add_argument('--verbose', action='store_true', help='verbose output')
     subparsers = parser.add_subparsers(help='sub-command help')
 
     # create the parser for the "init" command
     parser_init = subparsers.add_parser('init', help='init help')
     parser_init.add_argument('--host', help='host mol2 file')
     parser_init.add_argument('--guest', help='guest mol2 file')
+    parser_init.add_argument('--complex', help='complex PDB file')
     parser_init.add_argument('--implicit', action='store_true', help='use implicit solvent (default: explicit solvent)')
     parser_init.add_argument('--overwrite', action='store_true', help='force overwrite')
     parser_init.add_argument('--conc', type=float, default=50.0, help="ion concentration (mM)")
@@ -42,6 +43,7 @@ def main():
     if args.verbose:
         logging.basicConfig(level=logging.DEBUG)
 
+    args.func(args)
     try:
         args.func(args)
     except Exception as e:
