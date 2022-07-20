@@ -35,6 +35,10 @@ def antechamber(input, format, output_path, pl=-1, overwrite=False):
 def build(info, system_path, system_top, system_rst, system_pdb, dummy=False):
     from paprika.build.system import TLeap
 
+    has_host = 'host' in info
+    has_guest = 'guest' in info
+    has_complex = 'complex' in info
+
     system = TLeap()
     system.output_path = system_path
     system.pbc_type = None
@@ -43,18 +47,20 @@ def build(info, system_path, system_top, system_rst, system_pdb, dummy=False):
     system.template_lines = [
         "source leaprc.gaff2",
         "source leaprc.lipid21",
+        "set default PBRadii mbondi2",
     ]
 
-    if 'host' in info:
+    if has_host:
         host_dir = Path(info['host']['par_path']).resolve()
         host_name = info['host']['name']
     
         system.template_lines += [
             f"loadamberparams {host_dir}/{host_name}.frcmod",
             f"MOL = loadmol2 {host_dir}/{host_name}.gaff2.mol2",
+            f"saveamberparm MOL receptor.prmtop receptor.rst7",
         ]
 
-    if 'guest' in info:
+    if has_guest:
         guest_dir = Path(info['guest']['par_path']).resolve()
         guest_name = info['guest']['name']
 
@@ -62,27 +68,29 @@ def build(info, system_path, system_top, system_rst, system_pdb, dummy=False):
             system.template_lines += [
                 f"loadamberparams {guest_dir}/{guest_name}.frcmod",
                 f"LIG = loadmol2 {guest_dir}/{guest_name}.gaff2.mol2",
+                f"saveamberparm LIG ligand.prmtop ligand.rst7",
             ]
         else:
             guest_file = Path(info['guest']['file']).resolve()
             ext = guest_file.suffix[1:]
             system.template_lines += [
                 f"LIG = load{ext} {guest_file}",
+                f"saveamberparm LIG ligand.prmtop ligand.rst7",
             ]
 
-    if 'complex' in info:
+    if has_complex:
         complex_file = Path(info['complex']['file']).resolve()
         ext = complex_file.suffix[1:]
         system.template_lines += [
             f"model = load{ext} {complex_file}",
         ]
     else:
-        if args.host and args.guest:
-            system.template_lines += [ f"model = combine {{ host guest }}", ]
-        elif args.host:
-            system.template_lines += [ f"model = host", ]
+        if has_host and has_guest:
+            system.template_lines += [ f"model = combine {{ MOL LIG }}", ]
+        elif has_host:
+            system.template_lines += [ f"model = combine {{ MOL }}", ]
         else:
-            system.template_lines += [ f"model = guest", ]
+            system.template_lines += [ f"model = combine {{ LIG }}", ]
 
     system.template_lines += [
         "check model",
@@ -117,6 +125,7 @@ def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, num_wate
     system.template_lines = [
         "source leaprc.gaff2",
         "source leaprc.lipid21",
+        "set default PBRadii mbondi2",
         #"source leaprc.water.tip3p",
     ]
 

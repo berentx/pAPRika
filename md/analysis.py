@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 
 def eccentricity(points):
+    from scipy.spatial.distance import euclidean
     small_latwise = np.min(points[points[:, 0] == np.min(points[:, 0])], 0)
     small_lonwise = np.min(points[points[:, 1] == np.min(points[:, 1])], 0)
     big_latwise = np.max(points[points[:, 0] == np.max(points[:, 0])], 0)
@@ -43,7 +44,6 @@ def analysis(args):
     from MDAnalysis.analysis.hydrogenbonds.hbond_analysis import HydrogenBondAnalysis as HBA
     
     import numpy as np
-    from scipy.spatial.distance import euclidean
     from shapely.geometry import MultiPoint
     from rdkit import Chem
 
