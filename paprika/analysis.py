@@ -731,6 +731,9 @@ class fe_calc(object):
                         bool_list = ordered_values[k][r] > target + 180.0 * unit.degrees
                         ordered_values[k][r][bool_list] -= 360.0 * unit.degrees
 
+                    if rest.mask3 is not None:
+                        force_constants_T[l][r] = force_constants_T[l][r].to(unit.kcal/unit.mol/unit.degree**2)
+
                 # Compute the potential ... for each frame, sum the contributions for each restraint
                 # Note, we multiply by beta, and do some extra [l,:,None] to
                 # get the math operation correct.
@@ -952,6 +955,10 @@ class fe_calc(object):
                     ordered_values[k][r][bool_list] += 360.0 * unit.degrees
                     bool_list = ordered_values[k][r] > target + 180.0 * unit.degrees
                     ordered_values[k][r][bool_list] -= 360.0 * unit.degrees
+
+                #if rest.mask3 is not None:
+                #    force_constants_T[k][r] = force_constants_T[k][r].to(unit.kcal/unit.mol/unit.degree**2)
+                #    max_force_constants[r] = max_force_constants[r].to(unit.kcal/unit.mol/unit.degree**2)
 
             # Compute forces and store the values of the changing coordinate,
             # either lambda or target

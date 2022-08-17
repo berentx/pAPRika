@@ -4,6 +4,37 @@ import os
 from pathlib import Path
 import shutil
 
+from rdkit import Chem
+
+
+def parse_mol2_atomnames(mol2file):
+    in_atomblock = False
+    atomnames = []
+    for line in open(mol2file):
+        if line.startswith('@<TRIPOS>ATOM'):
+            in_atomblock = True
+            continue
+        if line.startswith('@<TRIPOS>BOND'):
+            in_atomblock = False
+            continue
+        if in_atomblock:
+            name = line.split()[1]
+            atomnames.append(name)
+    return atomnames
+
+def rename_complex_pdb(pdbfile, host_atomnames, guest_atomnames):
+    atomnames = host_atomnames + guest_atomnames
+    resname = ['MOL'] * len(host_atomnames) + ['LIG'] * len(guest_atomnames)
+    resnr = ['1'] * len(host_atomnames) + ['2'] * len(guest_atomnames)
+    index = 0
+    lines = []
+    for line in open(pdbfile):
+        if line.startswith('HETATM') or line.startswith('ATOM'):
+            line = f'ATOM  ' + line[6:12] + f'{atomnames[index]:^5s}' + f'{resname[index]:4s}' + line[21:23] + f'{resnr[index]:>3s}' + line[27:]
+            index += 1
+        lines.append(line)
+    open(pdbfile, 'w').write(''.join(lines))
+
 def antechamber(input, format, output_path, pl=-1, overwrite=False):
     output_mol2 = f'{input.stem}.gaff2.mol2'
     output_frcmod = f'{input.stem}.frcmod'
@@ -20,6 +51,16 @@ def antechamber(input, format, output_path, pl=-1, overwrite=False):
                '-o', f'{output_mol2}', '-c', 'bcc', '-s', '2', '-at', 'gaff2']
         if pl > 0:
             cmd += ['-pl', f'{pl:d}']
+
+        if format == 'sdf':
+            m = Chem.MolFromMolFile(str(input_path))
+        elif format == 'mol2':
+            m = Chem.MolFromMol2File(str(input_path))
+        charge = Chem.GetFormalCharge(m)
+        if charge != 0:
+            cmd += ['-nc', f'{charge:d}']
+        print(cmd)
+
         os.system(' '.join(cmd))
         assert Path(output_mol2).exists()
 
@@ -34,6 +75,9 @@ def antechamber(input, format, output_path, pl=-1, overwrite=False):
 
 def build(info, system_path, system_top, system_rst, system_pdb, dummy=False):
     from paprika.build.system import TLeap
+
+    if not system_path.exists():
+        system_path.mkdir()
 
     has_host = 'host' in info
     has_guest = 'guest' in info
@@ -53,21 +97,25 @@ def build(info, system_path, system_top, system_rst, system_pdb, dummy=False):
     if has_host:
         host_dir = Path(info['host']['par_path']).resolve()
         host_name = info['host']['name']
+        host_mol2_file = f'{host_dir}/{host_name}.gaff2.mol2'
+        host_atomnames = parse_mol2_atomnames(host_mol2_file)
     
         system.template_lines += [
             f"loadamberparams {host_dir}/{host_name}.frcmod",
-            f"MOL = loadmol2 {host_dir}/{host_name}.gaff2.mol2",
+            f"MOL = loadmol2 {host_mol2_file}",
             f"saveamberparm MOL receptor.prmtop receptor.rst7",
         ]
 
     if has_guest:
         guest_dir = Path(info['guest']['par_path']).resolve()
         guest_name = info['guest']['name']
+        guest_mol2_file = f'{guest_dir}/{guest_name}.gaff2.mol2'
+        guest_atomnames = parse_mol2_atomnames(guest_mol2_file)
 
         if info['guest']['par_path'] != 'None':
             system.template_lines += [
                 f"loadamberparams {guest_dir}/{guest_name}.frcmod",
-                f"LIG = loadmol2 {guest_dir}/{guest_name}.gaff2.mol2",
+                f"LIG = loadmol2 {guest_mol2_file}",
                 f"saveamberparm LIG ligand.prmtop ligand.rst7",
             ]
         else:
@@ -81,9 +129,16 @@ def build(info, system_path, system_top, system_rst, system_pdb, dummy=False):
     if has_complex:
         complex_file = Path(info['complex']['file']).resolve()
         ext = complex_file.suffix[1:]
+
+        # copy complex file
+        shutil.copy(complex_file, system_path/complex_file.name)
+        complex_file = (system_path/complex_file.name).resolve()
+        #rename_complex_pdb(complex_file, host_atomnames, guest_atomnames)
+
         system.template_lines += [
             f"model = load{ext} {complex_file}",
         ]
+
     else:
         if has_host and has_guest:
             system.template_lines += [ f"model = combine {{ MOL LIG }}", ]
@@ -142,7 +197,7 @@ def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, num_wate
         guest_name = info['guest']['name']
         system.template_lines += [
             f"loadamberparams {guest_dir}/{guest_name}.frcmod",
-            f"VTR = loadmol2 {guest_dir}/{guest_name}.gaff2.mol2",
+            f"LIG = loadmol2 {guest_dir}/{guest_name}.gaff2.mol2",
         ]
 
     if dummy:

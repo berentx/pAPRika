@@ -39,7 +39,7 @@ def antechamber(input, format, output_path, pl=-1, overwrite=False):
     os.chdir(output_path)
 
     if not Path(output_mol2).exists() or overwrite:
-        cmd = ['antechamber', '-fi', 'mol2', '-fo', 'mol2', '-i', str(input_path),
+        cmd = ['antechamber', '-fi', format, '-fo', 'mol2', '-i', str(input_path),
                '-o', f'{output_mol2}', '-c', 'bcc', '-s', '2', '-at', 'gaff2']
         if pl > 0:
             cmd += ['-pl', f'{pl:d}']
@@ -73,7 +73,7 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
 
     system.template_lines += [
         f"loadamberparams {host_dir}/{host_name}.frcmod",
-        f"{host_name.upper()} = loadmol2 {host_dir}/{host_name}.gaff2.mol2",
+        f"MOL = loadmol2 {host_dir}/{host_name}.gaff2.mol2",
     ]
 
     if info['guest']['par_path'] != 'None':
@@ -81,7 +81,7 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
         guest_name = info['guest']['name']
         system.template_lines += [
             f"loadamberparams {guest_dir}/{guest_name}.frcmod",
-            f"{guest_name.upper()} = loadmol2 {guest_dir}/{guest_name}.gaff2.mol2",
+            f"LIG = loadmol2 {guest_dir}/{guest_name}.gaff2.mol2",
         ]
 
     if dummy:
@@ -135,7 +135,7 @@ def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, num_wate
 
     system.template_lines += [
         f"loadamberparams {host_dir}/{host_name}.frcmod",
-        f"{host_name.upper()} = loadmol2 {host_dir}/{host_name}.gaff2.mol2",
+        f"MOL = loadmol2 {host_dir}/{host_name}.gaff2.mol2",
     ]
 
     if info['guest']['par_path'] != 'None':
@@ -143,7 +143,7 @@ def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, num_wate
         guest_name = info['guest']['name']
         system.template_lines += [
             f"loadamberparams {guest_dir}/{guest_name}.frcmod",
-            f"{guest_name.upper()} = loadmol2 {guest_dir}/{guest_name}.gaff2.mol2",
+            f"LIG = loadmol2 {guest_dir}/{guest_name}.gaff2.mol2",
         ]
 
     if dummy:
@@ -171,12 +171,16 @@ def init(args):
     logger.info('preparing host parameters')
 
     hostname = host.stem
-    host_par_path = Path(hostname)
+    host_par_path = host.parent/'gaff2'
     host_top = host_par_path/f'{hostname}.prmtop'
+    host_format = host.suffix[1:]
     if not host_top.exists():
-        antechamber(host, 'mol2', host_par_path, 10, args.overwrite)
+        antechamber(host, host_format, host_par_path, 10, args.overwrite)
 
-    host_mol = Chem.MolFromMol2File(str(host))
+    if host_format == 'mol2':
+        host_mol = Chem.MolFromMol2File(str(host))
+    elif host_format == 'sdf':
+        host_mol = Chem.MolFromMolFile(str(host))
 
     p_monomer = Chem.MolFromSmarts("O1C(O)CCCC1")
     monomers = host_mol.GetSubstructMatches(p_monomer)
@@ -190,10 +194,10 @@ def init(args):
         guest_par_path = None
         guest_top = None
     else:
-        guest_par_path = Path(guestname)
+        guest_par_path = guest.parent/'gaff2'
         guest_top = guest_par_path/f'{guestname}.prmtop'
         if not guest_top.exists():
-            antechamber(guest, 'mol2', guest_par_path, overwrite=args.overwrite)
+            antechamber(guest, guest.suffix[1:], guest_par_path, overwrite=args.overwrite)
 
     info = {
         'host': {
@@ -227,8 +231,8 @@ def init(args):
 
     logger.info('align complex')
 
-    G1 = f":{guestname.upper()}@{args.g1}"
-    G2 = f":{guestname.upper()}@{args.g2}"
+    G1 = f":LIG@{args.g1}"
+    G2 = f":LIG@{args.g2}"
 
     structure = pmd.load_file('complex/vac.prmtop', 'complex/vac.rst7', structure=True)
 
@@ -291,13 +295,13 @@ def init(args):
     monomers = host_mol.GetSubstructMatches(p_monomer)
 
     if args.h1 and args.h2 and args.h3:
-        H1 = f":{hostname.upper()}@{args.h1}"
-        H2 = f":{hostname.upper()}@{args.h2}"
-        H3 = f":{hostname.upper()}@{args.h3}"
+        H1 = f":MOL@{args.h1}"
+        H2 = f":MOL@{args.h2}"
+        H3 = f":MOL@{args.h3}"
     else:
-        H1 = f":{hostname.upper()}@{monomers[0][1]+1}"
-        H2 = f":{hostname.upper()}@{monomers[2][1]+1}"
-        H3 = f":{hostname.upper()}@{monomers[-2][1]+1}"
+        H1 = f":MOL@{monomers[0][1]+1}"
+        H2 = f":MOL@{monomers[2][1]+1}"
+        H3 = f":MOL@{monomers[-2][1]+1}"
 
     print(H1, H2, H3)
 
@@ -310,9 +314,9 @@ def init(args):
     host_restraints = []
 
     for i, m in enumerate(monomers):
-        O5 = f":{hostname.upper()}@{monomers[i][0]+1}"
-        C1 = f":{hostname.upper()}@{monomers[i][1]+1}"
-        O1 = f":{hostname.upper()}@{monomers[i][2]+1}"
+        O5 = f":MOL@{monomers[i][0]+1}"
+        C1 = f":MOL@{monomers[i][1]+1}"
+        O1 = f":MOL@{monomers[i][2]+1}"
 
         o1 = host_mol.GetAtomWithIdx(monomers[i][2])
         neighbor = [n.GetIdx() for n in o1.GetNeighbors() if n.GetIdx() not in monomers[i]].pop()
@@ -321,8 +325,8 @@ def init(args):
             if neighbor in monomers[j]:
                 break
 
-        C4n = f":{hostname.upper()}@{monomers[j][5]+1}"
-        C5n = f":{hostname.upper()}@{monomers[j][6]+1}"
+        C4n = f":MOL@{monomers[j][5]+1}"
+        C5n = f":MOL@{monomers[j][6]+1}"
 
         print(O5, C1, O1, C4n, C5n)
 
@@ -473,7 +477,7 @@ def init(args):
             target_difference = guest_restraints[0].phase['pull']['targets'][int(window[1:])].magnitude + d0
 
             for atom in structure.atoms:
-                if atom.residue.name == guestname.upper():
+                if atom.residue.name == 'LIG':
                     atom.xz += target_difference
             structure.save(str(folder/"apr.prmtop"), overwrite=True)
             structure.save(str(folder/"apr.rst7"), overwrite=True)
@@ -483,7 +487,7 @@ def init(args):
             target_difference = final_distance + d0
 
             for atom in structure.atoms:
-                if atom.residue.name == guestname.upper():
+                if atom.residue.name == 'LIG':
                     atom.xz += target_difference
             structure.save(str(folder/"apr.prmtop"), overwrite=True)
             structure.save(str(folder/"apr.rst7"), overwrite=True)

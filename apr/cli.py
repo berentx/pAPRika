@@ -42,6 +42,8 @@ def main():
     parser_run = subparsers.add_parser('run', help='run help', parents=[parser])
     parser_run.add_argument('--implicit', action='store_true', help='use implicit solvent (default: explicit solvent)')
     parser_run.add_argument('--ns', type=float, default=1)
+    parser_run.add_argument('--window', type=str, default="all")
+    parser_run.add_argument('--extend', action='store_true')
     parser_run.set_defaults(func=run)
 
     # create the parser for the "analysis" command

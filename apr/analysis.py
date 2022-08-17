@@ -10,7 +10,7 @@ def analysis(args):
 
     free_energy = apr_analysis.fe_calc()
     free_energy.topology = "system.pdb"
-    free_energy.trajectory = "production.dcd"
+    free_energy.trajectory = "production*.dcd"
     free_energy.path = 'windows'
     free_energy.restraint_list = guest_restraints + host_restraints
 

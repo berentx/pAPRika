@@ -86,9 +86,16 @@ def run(args):
     # production
     for window in window_list:
         folder = window
+        prefix = 'production'
+        rstfile = 'equilibration.rst'
 
-        if Path(f'{folder}/production.pdb').exists():
-            continue
+        if Path(f'{folder}/{prefix}.pdb').exists():
+            if not args.extend:
+                continue
+            else:
+                n_steps = len(Path(f'{folder}').glob(f'production.*.pdb'))
+                prefix = f'production.{n_step+1}'
+                rstfile = f'production.{n_step-1}'
 
         logger.info(f"Running production in window {window}...")
         print(f"Running production in window {window}...")
@@ -110,9 +117,9 @@ def run(args):
         integrator = openmm.LangevinIntegrator(300 * unit.kelvin, 1.0 / unit.picoseconds, timestep)
 
         # Reporters
-        dcd_reporter = app.DCDReporter(os.path.join(folder, 'production.dcd'), 5000)
+        dcd_reporter = app.DCDReporter(os.path.join(folder, f'{prefix}.dcd'), 5000)
         state_reporter = app.StateDataReporter(
-            os.path.join(folder, 'production.log'),
+            os.path.join(folder, f'{prefix}.log'),
             1000,
             step=True,
             kineticEnergy=True,
@@ -127,7 +134,7 @@ def run(args):
         simulation.context.setPositions(coords.positions)
         simulation.reporters.append(dcd_reporter)
         simulation.reporters.append(state_reporter)
-        with open(os.path.join(folder, 'equilibration.rst'), 'r') as f:
+        with open(os.path.join(folder, rstfile), 'r') as f:
             simulation.context.setState(openmm.XmlSerializer.deserialize(f.read()))
     
         # MD steps
@@ -135,8 +142,8 @@ def run(args):
     
         # Save final coordinates
         state = simulation.context.getState(getPositions=True, getVelocities=True, enforcePeriodicBox=enforcePBC)
-        with open(os.path.join(folder, 'production.pdb'), 'w') as file:
+        with open(os.path.join(folder, f'{prefix}.pdb'), 'w') as file:
             app.PDBFile.writeFile(simulation.topology, state.getPositions(), file, keepIds=True)
-        with open(os.path.join(folder, 'production.rst'), 'w') as f:
+        with open(os.path.join(folder, f'{prefix}.rst'), 'w') as f:
             f.write(openmm.XmlSerializer.serialize(state))
 
