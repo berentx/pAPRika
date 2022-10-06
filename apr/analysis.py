@@ -14,13 +14,11 @@ def analysis(args):
     free_energy.path = 'windows'
     free_energy.restraint_list = guest_restraints + host_restraints
 
-    #if Path("APR_simulation_data.json").exists():
-    #    free_energy.collect_data_from_json("APR_simulation_data.json")
-    #else:
-    #    free_energy.collect_data()
-    #    free_energy.save_data("APR_simulation_data.json")
-    free_energy.collect_data()
-    free_energy.save_data("APR_simulation_data.json")
+    if Path("APR_simulation_data.json").exists():
+        free_energy.collect_data_from_json("APR_simulation_data.json")
+    else:
+        free_energy.collect_data()
+        free_energy.save_data("APR_simulation_data.json")
 
     free_energy.methods = ['ti-block']
     free_energy.ti_matrix = "diagonal"
