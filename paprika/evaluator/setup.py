@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 import parmed as pmd
+from openff.units import unit as openff_unit
 
 from paprika.build import align
 from paprika.restraints import DAT_restraint, static_DAT_restraint
@@ -237,15 +238,14 @@ class Setup:
             * a ``force_constant`` entry which specifies the force constant of the
               restraint.
 
-        These 'schemas` map directly to the 'restraints -> static -> restraint'
+        These `schemas` map directly to the 'restraints -> static -> restraint'
         dictionaries specified in the `taproom` host YAML files.
 
         Parameters
         ----------
         coordinate_path
             The path to the coordinate file which the restraints will be applied to.
-            This should contain either the host or the complex, the dummy atoms and
-            and solvent.
+            This should contain either the host or the complex, the dummy atoms and solvent.
         n_attach_windows
             The total number of attach windows being used in the APR calculation.
         n_pull_windows
@@ -306,15 +306,14 @@ class Setup:
               restraint.
             * a ``target`` entry which specifies the target value of the restraint.
 
-        These 'schemas` map directly to the 'restraints -> conformational -> restraint'
+        These `schemas` map directly to the 'restraints -> conformational -> restraint'
         dictionaries specified in the ``taproom`` host YAML files.
 
         Parameters
         ----------
         coordinate_path
             The path to the coordinate file which the restraints will be applied to.
-            This should contain either the host or the complex, the dummy atoms and
-            and solvent.
+            This should contain either the host or the complex, the dummy atoms and solvent.
         attach_lambdas
             The values 'lambda' being used during the attach phase of the APR
             calculation.
@@ -434,13 +433,15 @@ class Setup:
             restraint.attach["fc_final"] = restraint_schema["force_constant"]
             restraint.attach["fraction_list"] = [1.0] * n_attach_windows
 
-            # This target should be overridden by the custom values.
-            restraint.attach["target"] = 999.99
-            restraint.custom_restraint_values["r2"] = 91
-            restraint.custom_restraint_values["r3"] = 91
+            # This target will be overridden by the custom values.
+            restraint.attach["target"] = 91 * openff_unit.degrees
+            restraint.custom_restraint_values["r2"] = 91 * openff_unit.degrees
+            restraint.custom_restraint_values["r3"] = 91 * openff_unit.degrees
 
             # 0 force constant between 91 degrees and 180 degrees.
-            restraint.custom_restraint_values["rk3"] = 0.0
+            restraint.custom_restraint_values["rk3"] = (
+                0.0 * openff_unit.kcal / openff_unit.mole / openff_unit.radians**2
+            )
             restraint.initialize()
 
             restraints.append(restraint)
@@ -506,8 +507,8 @@ class Setup:
             restraint.attach["target"] = restraint_schema["target"]
 
             # Minimum distance is 0 Angstrom
-            restraint.custom_restraint_values["r1"] = 0
-            restraint.custom_restraint_values["r2"] = 0
+            restraint.custom_restraint_values["r1"] = 0 * openff_unit.degrees
+            restraint.custom_restraint_values["r2"] = 0 * openff_unit.degrees
 
             # Harmonic force constant beyond target distance.
             restraint.custom_restraint_values["rk2"] = restraint_schema[

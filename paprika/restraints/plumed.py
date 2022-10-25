@@ -2,7 +2,7 @@ import logging
 import os
 
 import numpy as np
-from openff.units import unit as pint_unit
+from openff.units import unit as openff_unit
 from parmed.structure import Structure as ParmedStructureClass
 
 from paprika.build.dummy import extract_dummy_atoms
@@ -14,13 +14,13 @@ logger = logging.getLogger(__name__)
 _PI_ = np.pi
 
 _plumed_unit_dict = {
-    pint_unit.kcal / pint_unit.mole: "kcal/mol",
-    pint_unit.kJ / pint_unit.mole: "kj/mol",
-    pint_unit.nanometer: "nm",
-    pint_unit.angstrom: "A",
-    pint_unit.picosecond: "ps",
-    pint_unit.femtosecond: "fs",
-    pint_unit.nanosecond: "ns",
+    openff_unit.kcal / openff_unit.mole: "kcal/mol",
+    openff_unit.kJ / openff_unit.mole: "kj/mol",
+    openff_unit.nanometer: "nm",
+    openff_unit.angstrom: "A",
+    openff_unit.picosecond: "ps",
+    openff_unit.femtosecond: "fs",
+    openff_unit.nanosecond: "ns",
 }
 
 
@@ -208,9 +208,9 @@ class Plumed:
         # Check user-specified units
         if self.output_units is None:
             self.output_units = {
-                "energy": pint_unit.kcal / pint_unit.mole,
-                "length": pint_unit.angstrom,
-                "time": pint_unit.nanosecond,
+                "energy": openff_unit.kcal / openff_unit.mole,
+                "length": openff_unit.angstrom,
+                "time": openff_unit.nanosecond,
             }
         _check_plumed_units(self.output_units)
 
@@ -229,12 +229,12 @@ class Plumed:
         self._initialize()
 
         # Loop over APR windows
-        for windows in self.window_list:
+        for window in self.window_list:
 
-            window, phase = parse_window(windows)
+            window_number, phase = parse_window(window)
 
             # Check if file exist and write header line
-            with open(os.path.join(self.path, windows, self.file_name), "w") as file:
+            with open(os.path.join(self.path, window, self.file_name), "w") as file:
                 file.write(self.header_line + "\n")
 
             cv_index = 1
@@ -250,11 +250,12 @@ class Plumed:
                 # Skip restraint if the target or force constant is not defined.
                 # Example: wall restraints only used during the attach phase.
                 try:
-                    target = restraint.phase[phase]["targets"][window]
+                    target = restraint.phase[phase]["targets"][window_number]
                     force_constant = (
-                        restraint.phase[phase]["force_constants"][window]
+                        restraint.phase[phase]["force_constants"][window_number]
                         * self.k_factor
                     )
+
                 except TypeError:
                     continue
 
@@ -262,9 +263,20 @@ class Plumed:
                 atom_index = self._get_atom_indices(restraint)
                 atom_string = ",".join(map(str, atom_index))
 
+                # Determine bias type for half-harmonic potentials
+                bias_type, restraint_values = get_bias_potential_type(
+                    restraint, phase, window_number, return_values=True
+                )
+                if bias_type == "upper_walls":
+                    target = restraint_values["r3"]
+                    force_constant = restraint_values["rk3"] * self.k_factor
+                elif bias_type == "lower_walls":
+                    target = restraint_values["r2"]
+                    force_constant = restraint_values["rk2"] * self.k_factor
+
                 # Convert units to the correct type for PLUMED module
                 if restraint.restraint_type == "distance":
-                    target = target.to(pint_unit.angstrom)
+                    target = target.to(openff_unit.angstrom)
                     force_constant = force_constant.to(
                         self.output_units["energy"] / self.output_units["length"] ** 2
                     )
@@ -272,13 +284,10 @@ class Plumed:
                     restraint.restraint_type == "angle"
                     or restraint.restraint_type == "torsion"
                 ):
-                    target = target.to(pint_unit.radians)
+                    target = target.to(openff_unit.radians)
                     force_constant = force_constant.to(
-                        self.output_units["energy"] / pint_unit.radians**2
+                        self.output_units["energy"] / openff_unit.radians**2
                     )
-
-                # Determine bias type for this restraint
-                bias_type = get_bias_potential_type(restraint, phase, window)
 
                 # Append cv strings to lists
                 # The code below prevents duplicate cv definition.
@@ -306,7 +315,7 @@ class Plumed:
                 cv_index += 1
 
             # Write collective variables to file
-            self._write_colvar_to_file(windows, cv_lines, bias_lines)
+            self._write_colvar_to_file(window, cv_lines, bias_lines)
 
     def _write_colvar_to_file(self, window, cv_list, bias_list):
         with open(os.path.join(self.path, window, self.file_name), "a") as file:
@@ -387,7 +396,9 @@ class Plumed:
 
         return atom_index
 
-    def add_dummy_atom_restraints(self, structure, window, path=None):
+    def add_dummy_atom_restraints(
+        self, structure, window, resname=["DM1", "DM2", "DM3"], path=None
+    ):
         """
         Add positional restraints on dummy atoms to the restraint files.
 
@@ -397,6 +408,8 @@ class Plumed:
             The reference structure that is used to determine the absolute coordinate of the dummy atoms.
         window: str
             APR window where the structure is stored for extracting the dummy atom positions.
+        resname: list
+            A list of residue name for the dummy atoms
         path: os.PathLike, optional, default=None
             Path of the restraint file. If set to ``None`` (default) self.path will be used.
 
@@ -413,7 +426,7 @@ class Plumed:
             )
 
         # Extract dummy atoms
-        dummy_atoms = extract_dummy_atoms(structure, serial=True)
+        dummy_atoms = extract_dummy_atoms(structure, resname=resname, serial=True)
 
         # Write dummy atom info to plumed file
         if path is not None:

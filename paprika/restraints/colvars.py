@@ -2,7 +2,7 @@ import logging
 import os
 
 import numpy as np
-from openff.units import unit as pint_unit
+from openff.units import unit as openff_unit
 
 from paprika.restraints.plumed import Plumed
 from paprika.restraints.utils import get_bias_potential_type, parse_window
@@ -148,24 +148,32 @@ class Colvars(Plumed):
                 atom_index = self._get_atom_indices(restraint)
                 atom_string = " ".join(map(str, atom_index))
 
+                # Determine bias type for half-harmonic potentials
+                bias_type, restraint_values = get_bias_potential_type(
+                    restraint, phase, window_number, return_values=True
+                )
+                if bias_type == "upper_walls":
+                    target = restraint_values["r3"]
+                    force_constant = restraint_values["rk3"] * self.k_factor
+                elif bias_type == "lower_walls":
+                    target = restraint_values["r2"]
+                    force_constant = restraint_values["rk2"] * self.k_factor
+
                 # Convert units to the correct type for COLVAR module
-                energy_units = pint_unit.kcal / pint_unit.mole
+                energy_units = openff_unit.kcal / openff_unit.mole
                 if restraint.restraint_type == "distance":
-                    target = target.to(pint_unit.angstrom)
+                    target = target.to(openff_unit.angstrom)
                     force_constant = force_constant.to(
-                        energy_units / pint_unit.angstrom**2
+                        energy_units / openff_unit.angstrom**2
                     )
                 elif (
                     restraint.restraint_type == "angle"
                     or restraint.restraint_type == "torsion"
                 ):
-                    target = target.to(pint_unit.degrees)
+                    target = target.to(openff_unit.degrees)
                     force_constant = force_constant.to(
-                        energy_units / pint_unit.degrees**2
+                        energy_units / openff_unit.degrees**2
                     )
-
-                # Determine bias type for this restraint
-                bias_type = get_bias_potential_type(restraint, phase, window_number)
 
                 # Append cv to list
                 # The code below prevents duplicate cv definition.
@@ -318,7 +326,7 @@ class Colvars(Plumed):
             The file object handle to save the plumed file.
         dummy_atoms : dict
             Dictionary containing information about the dummy atoms.
-        kpos : float or pint_unit.Quantity
+        kpos : float or openff.unit.Quantity
             Spring constant used to restrain dummy atoms (default for float: kcal/mol/A^2).
 
         Examples
@@ -339,7 +347,8 @@ class Colvars(Plumed):
         """
         # Check k units
         kpos = check_unit(
-            kpos, base_unit=pint_unit.kcal / pint_unit.mole / pint_unit.angstrom**2
+            kpos,
+            base_unit=openff_unit.kcal / openff_unit.mole / openff_unit.angstrom**2,
         )
 
         # Get dummy atom indices

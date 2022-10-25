@@ -8,7 +8,7 @@ from itertools import compress
 import numpy as np
 import pymbar
 import pytraj as pt
-from openff.units import unit
+from openff.units import unit as openff_unit
 from pymbar import timeseries
 from scipy.interpolate import Akima1DInterpolator
 
@@ -41,13 +41,15 @@ class fe_calc(object):
 
     @property
     def temperature(self):
-        """float or unit.Quantity: The temperature used during the simulation. This will update β (1/kT) as well."""
+        """
+        float or openff.unit.Quantity: The temperature used during the simulation. This will update β (1/kT) as well.
+        """
         return self._temperature
 
     @temperature.setter
     def temperature(self, new_temperature):
         """Update temperature and β with a new temperature."""
-        self._temperature = check_unit(new_temperature, base_unit=unit.kelvin)
+        self._temperature = check_unit(new_temperature, base_unit=openff_unit.kelvin)
         self.beta = 1 / (self.k_B * self._temperature)
 
     @property
@@ -157,6 +159,7 @@ class fe_calc(object):
 
             - ``mbar-autoc``
             - ``mbar-block``
+            - ``mbar-boot``
             - ``ti-block``
 
         .. note ::
@@ -191,17 +194,17 @@ class fe_calc(object):
         self._conservative_subsample = value
 
     @property
-    def bootcycles(self) -> int:
+    def boot_cycles(self) -> int:
         """
         int: The number of bootstrap iterations for the TI methods.
 
         **Default**: ``1000``
         """
-        return self._bootcycles
+        return self._boot_cycles
 
-    @bootcycles.setter
-    def bootcycles(self, value):
-        self._bootcycles = value
+    @boot_cycles.setter
+    def boot_cycles(self, value):
+        self._boot_cycles = value
 
     @property
     def compute_roi(self) -> bool:
@@ -343,46 +346,46 @@ class fe_calc(object):
 
     @property
     def energy_unit(self):
-        """pint.unit: The based unit for energy."""
+        """openff.unit: The based unit for energy."""
         return self._energy_unit
 
     @energy_unit.setter
-    def energy_unit(self, value: unit.Quantity):
+    def energy_unit(self, value: openff_unit.Quantity):
         self._energy_unit = value
 
     @property
     def distance_unit(self):
-        """pint.unit: The base unit for distance."""
+        """openff.unit: The base unit for distance."""
         return self._distance_unit
 
     @distance_unit.setter
-    def distance_unit(self, value: unit.Quantity):
+    def distance_unit(self, value: openff_unit.Quantity):
         self._distance_unit = value
 
     @property
     def angle_unit(self):
-        """pint.unit: The base unit for angles."""
+        """openff.unit: The base unit for angles."""
         return self._angle_unit
 
     @angle_unit.setter
-    def angle_unit(self, value: unit.Quantity):
+    def angle_unit(self, value: openff_unit.Quantity):
         self._angle_unit = value
 
     @property
     def temperature_unit(self):
-        """pint.unit: The base unit for temperature."""
+        """openff.unit: The base unit for temperature."""
         return self._temperature_unit
 
     @temperature_unit.setter
-    def temperature_unit(self, value: unit.Quantity):
+    def temperature_unit(self, value: openff_unit.Quantity):
         self._temperature_unit = value
 
     def __init__(self):
 
-        self._energy_unit = unit.kcal / unit.mole
-        self._distance_unit = unit.angstrom
-        self._angle_unit = unit.degrees
-        self._temperature_unit = unit.kelvin
+        self._energy_unit = openff_unit.kcal / openff_unit.mole
+        self._distance_unit = openff_unit.angstrom
+        self._angle_unit = openff_unit.radian
+        self._temperature_unit = openff_unit.kelvin
 
         self._temperature = 298.15 * self._temperature_unit
         self.k_B = 1.987204118e-3 * self._energy_unit / self._temperature_unit
@@ -396,7 +399,7 @@ class fe_calc(object):
         self._simulation_data = None
         self._methods = ["mbar-block"]
         self._conservative_subsample = False
-        self._bootcycles = 1000
+        self._boot_cycles = 1000
         self._compute_roi = False
         self._compute_largest_neighbor = False
         self._ti_matrix = "full"
@@ -612,7 +615,7 @@ class fe_calc(object):
             for restraint_index, restraint in enumerate(active_attach_restraints):
                 data[phase][window_index].append([])
                 data[phase][window_index][restraint_index] = read_restraint_data(
-                    traj, restraint
+                    traj, restraint, self.distance_unit, self.angle_unit
                 )
 
         for window_index, window in enumerate(ordered_pull_windows):
@@ -624,7 +627,7 @@ class fe_calc(object):
             for restraint_index, restraint in enumerate(active_pull_restraints):
                 data[phase][window_index].append([])
                 data[phase][window_index][restraint_index] = read_restraint_data(
-                    traj, restraint
+                    traj, restraint, self.distance_unit, self.angle_unit
                 )
 
         for window_index, window in enumerate(ordered_release_windows):
@@ -636,7 +639,7 @@ class fe_calc(object):
             for restraint_index, restraint in enumerate(active_release_restraints):
                 data[phase][window_index].append([])
                 data[phase][window_index][restraint_index] = read_restraint_data(
-                    traj, restraint
+                    traj, restraint, self.distance_unit, self.angle_unit
                 )
 
         return data
@@ -655,6 +658,21 @@ class fe_calc(object):
 
         ordered_force_constants = [i[self.orders[phase]] for i in force_constants]
         ordered_targets = [i[self.orders[phase]] for i in targets]
+
+        # Convert targets and force constants to proper base units
+        for i, rest in enumerate(active_restraints):
+            # Distance
+            if rest.mask3 is None and rest.mask4 is None:
+                ordered_targets[i] = ordered_targets[i].to(self.distance_unit)
+                ordered_force_constants[i] = ordered_force_constants[i].to(
+                    self.energy_unit / self.distance_unit**2
+                )
+            # Angles
+            elif rest.mask3 is not None or rest.mask4 is not None:
+                ordered_targets[i] = ordered_targets[i].to(self.angle_unit)
+                ordered_force_constants[i] = ordered_force_constants[i].to(
+                    self.energy_unit / self.angle_unit**2
+                )
 
         return (
             number_of_windows,
@@ -699,7 +717,7 @@ class fe_calc(object):
         # Number of data points in each restraint value array
         N_k = np.array(data_points)
 
-        # Setup the reduced potential energy array. ie, the potential of each window's
+        # Set up the reduced potential energy array. ie, the potential of each window's
         # coordinates in each window's potential function
         u_kln = np.zeros([num_win, num_win, max_data_points], np.float64)
 
@@ -726,10 +744,18 @@ class fe_calc(object):
                     if rest.mask3 is not None and rest.mask4 is not None:
                         target = targets_T[l, r]
                         # Coords from coord window, k
-                        bool_list = ordered_values[k][r] < target - 180.0 * unit.degrees
-                        ordered_values[k][r][bool_list] += 360.0 * unit.degrees
-                        bool_list = ordered_values[k][r] > target + 180.0 * unit.degrees
-                        ordered_values[k][r][bool_list] -= 360.0 * unit.degrees
+                        bool_list = ordered_values[k][r] < target - (
+                            180.0 * openff_unit.degrees
+                        ).to(self.angle_unit)
+                        ordered_values[k][r][bool_list] += (
+                            360.0 * openff_unit.degrees
+                        ).to(self.angle_unit)
+                        bool_list = ordered_values[k][r] > target + (
+                            180.0 * openff_unit.degrees
+                        ).to(self.angle_unit)
+                        ordered_values[k][r][bool_list] -= (
+                            360.0 * openff_unit.degrees
+                        ).to(self.angle_unit)
 
                     if rest.mask3 is not None:
                         force_constants_T[l][r] = force_constants_T[l][r].to(unit.kcal/unit.mol/unit.degree**2)
@@ -766,9 +792,9 @@ class fe_calc(object):
                 variance = np.var(u_kln[k, l, 0 : N_k[k]])
                 g_k[k] = N_k[k] * (sem**2) / variance
 
-        if method == "mbar-autoc":
+        if method == "mbar-autoc" or method == "mbar-boot":
             for k in range(num_win):
-                [t0, g_k[k], Neff_max] = timeseries.detectEquilibration(
+                [t0, g_k[k], Neff_max] = timeseries.detect_equilibration(
                     N_k[k]
                 )  # compute indices of uncorrelated
                 # timeseries
@@ -799,40 +825,49 @@ class fe_calc(object):
             frac_N_k = np.array([int(fraction * n) for n in N_k], dtype=np.int32)
 
             mbar = pymbar.MBAR(u_kln, frac_N_k, verbose=verbose)
-            mbar_results = mbar.getFreeEnergyDifferences(
-                compute_uncertainty=True, return_dict=True
+            mbar_results = mbar.compute_free_energy_differences(
+                compute_uncertainty=True
             )
 
             Deltaf_ij = mbar_results["Delta_f"]
             dDeltaf_ij = mbar_results["dDelta_f"]
 
-            Deltaf_ij_N_eff = mbar.computeEffectiveSampleNumber()
+            Deltaf_ij_N_eff = mbar.compute_effective_sample_number()
 
-            if method == "mbar-block" or "mbar-autoc":
-                # Create subsampled indices and count their lengths
-                frac_N_ss = np.array([int(fraction * n) for n in N_ss], dtype=np.int32)
+            # Estimate uncertainty from decorrelated samples
+            # Create subsampled indices and count their lengths
+            frac_N_ss = np.array([int(fraction * n) for n in N_ss], dtype=np.int32)
 
-                # Create a new potential array for the uncertainty calculation
-                # (are we using too much memory?)
-                u_kln_err = np.zeros([num_win, num_win, np.max(frac_N_ss)], np.float64)
+            # Create a new potential array for the uncertainty calculation
+            # (are we using too much memory?)
+            u_kln_err = np.zeros([num_win, num_win, np.max(frac_N_ss)], np.float64)
 
-                # Populate the subsampled array, drawing the appropriate
-                # fraction of subsamples from the original
-                for k in range(num_win):
-                    for l in range(num_win):
-                        u_kln_err[k, l, 0 : frac_N_ss[k]] = u_kln[
-                            k, l, ss_indices[k][0 : frac_N_ss[k]]
-                        ]
+            # Populate the subsampled array, drawing the appropriate
+            # fraction of subsamples from the original
+            for k in range(num_win):
+                for l in range(num_win):
+                    u_kln_err[k, l, 0 : frac_N_ss[k]] = u_kln[
+                        k, l, ss_indices[k][0 : frac_N_ss[k]]
+                    ]
 
-                # We toss junk_Deltaf_ij, because we got a better estimate for it from above using all data.
-                # But dDeltaf_ij will replace the previous, because it correctly accounts for the
-                # correlation in the data.
-                mbar = pymbar.MBAR(u_kln_err, frac_N_ss, verbose=verbose)
-                mbar_results = mbar.getFreeEnergyDifferences(
-                    compute_uncertainty=True, return_dict=True
+            # We toss junk_Deltaf_ij, because we got a better estimate for it from above using all data.
+            # But dDeltaf_ij will replace the previous, because it correctly accounts for the
+            # correlation in the data.
+            if method == "mbar-boot":
+                mbar = pymbar.MBAR(
+                    u_kln_err, frac_N_ss, verbose=verbose, n_bootstraps=self.boot_cycles
                 )
-                dDeltaf_ij = mbar_results["dDelta_f"]
-                dDeltaf_ij_N_eff = mbar.computeEffectiveSampleNumber()
+                mbar_results = mbar.compute_free_energy_differences(
+                    compute_uncertainty=True, uncertainty_method="bootstrap"
+                )
+            else:
+                mbar = pymbar.MBAR(u_kln_err, frac_N_ss, verbose=verbose)
+                mbar_results = mbar.compute_free_energy_differences(
+                    compute_uncertainty=True
+                )
+
+            dDeltaf_ij = mbar_results["dDelta_f"]
+            dDeltaf_ij_N_eff = mbar.compute_effective_sample_number()
 
             # Put back into kcal/mol
             Deltaf_ij /= self.beta
@@ -951,10 +986,18 @@ class fe_calc(object):
 
                 if rest.mask3 is not None and rest.mask4 is not None:
                     target = targets_T[k, r]
-                    bool_list = ordered_values[k][r] < target - 180.0 * unit.degrees
-                    ordered_values[k][r][bool_list] += 360.0 * unit.degrees
-                    bool_list = ordered_values[k][r] > target + 180.0 * unit.degrees
-                    ordered_values[k][r][bool_list] -= 360.0 * unit.degrees
+                    bool_list = ordered_values[k][r] < target - (
+                        180.0 * openff_unit.degrees
+                    ).to(self.angle_unit)
+                    ordered_values[k][r][bool_list] += (360.0 * openff_unit.degrees).to(
+                        self.angle_unit
+                    )
+                    bool_list = ordered_values[k][r] > target + (
+                        180.0 * openff_unit.degrees
+                    ).to(self.angle_unit)
+                    ordered_values[k][r][bool_list] -= (360.0 * openff_unit.degrees).to(
+                        self.angle_unit
+                    )
 
                 #if rest.mask3 is not None:
                 #    force_constants_T[k][r] = force_constants_T[k][r].to(unit.kcal/unit.mol/unit.degree**2)
@@ -1054,7 +1097,7 @@ class fe_calc(object):
                 frac_dU_sems = dU_stdv / np.sqrt(fraction * dU_Nunc)
 
             dU_samples = np.random.normal(
-                frac_dU_avgs, frac_dU_sems, size=(self.bootcycles, frac_dU_avgs.size)
+                frac_dU_avgs, frac_dU_sems, size=(self.boot_cycles, frac_dU_avgs.size)
             )
 
             # Run bootstraps
@@ -1084,7 +1127,7 @@ class fe_calc(object):
             max_fraction = np.max(self.fractions)
             # If we didn't compute fe/sem for fraction 1.0 already, do it now
             dU_samples = np.random.normal(
-                dU_avgs, dU_sems, size=(self.bootcycles, dU_avgs.size)
+                dU_avgs, dU_sems, size=(self.boot_cycles, dU_avgs.size)
             )
             if not np.isclose(max_fraction, 1.0):
                 junk_fe, total_sem_matrix = integrate_bootstraps(
@@ -1100,7 +1143,7 @@ class fe_calc(object):
                 # Compute overall integrated SEM with 10% smaller SEM for dU[k]
                 cnvg_dU_samples = np.array(dU_samples)
                 cnvg_dU_samples[:, k] = np.random.normal(
-                    dU_avgs[k], 0.9 * dU_sems[k], self.bootcycles
+                    dU_avgs[k], 0.9 * dU_sems[k], self.boot_cycles
                 )
                 junk_fe, cnvg_sem_matrix = integrate_bootstraps(
                     dl_vals, cnvg_dU_samples, x_intp=dl_intp, matrix=self.ti_matrix
@@ -1173,7 +1216,11 @@ class fe_calc(object):
                     "Running {} analysis on {} phase ...".format(method, phase)
                 )
 
-                if method == "mbar-block" or method == "mbar-autoc":
+                if (
+                    method == "mbar-block"
+                    or method == "mbar-autoc"
+                    or method == "mbar-boot"
+                ):
                     self.run_mbar(phase, prepared_data, method)
                 elif method == "ti-block":
                     self.run_ti(phase, prepared_data, method)
@@ -1222,7 +1269,9 @@ class fe_calc(object):
                     # Store convergence values, which are helpful for running
                     # simulations
                     windows = len(self.results[phase][method]["sem_matrix"])
-                    self.results[phase][method]["largest_neighbor"] = unit.Quantity(
+                    self.results[phase][method][
+                        "largest_neighbor"
+                    ] = openff_unit.Quantity(
                         np.ones([windows], np.float64) * -1.0,
                         units=self.energy_unit,
                     )
@@ -1360,6 +1409,7 @@ class fe_calc(object):
             targs[4],
             fcs[5],
             targs[5],
+            self.energy_unit,
         )
 
     def save_results(self, filepath="results.json", overwrite=False):
@@ -1629,7 +1679,9 @@ def load_trajectory(window, trajectory, topology, single_topology=False):
     return traj
 
 
-def read_restraint_data(traj, restraint):
+def read_restraint_data(
+    traj, restraint, distance_unit=openff_unit.angstrom, angle_unit=openff_unit.degree
+):
     """Given a trajectory and restraint, read the restraint and return the DAT values.
 
     Parameters
@@ -1638,6 +1690,10 @@ def read_restraint_data(traj, restraint):
         A trajectory, probably loaded by load_trajectory
     restraint: :class:`DAT_restraint`
         The restraint to analyze
+    distance_unit: openff.unit.Quantity
+        The unit for the returned distance values
+    angle_unit: openff.unit.Quantity
+        The unit for the returned angle values
 
     Returns
     -------
@@ -1651,31 +1707,31 @@ def read_restraint_data(traj, restraint):
         and not restraint.mask3
         and not restraint.mask4
     ):
-        data = unit.Quantity(
+        data = openff_unit.Quantity(
             pt.distance(traj, " ".join([restraint.mask1, restraint.mask2]), image=True),
-            units=unit.angstrom,
-        )
+            units=openff_unit.angstrom,
+        ).to(distance_unit)
 
     elif (
         restraint.mask1 and restraint.mask2 and restraint.mask3 and not restraint.mask4
     ):
-        data = unit.Quantity(
+        data = openff_unit.Quantity(
             pt.angle(
                 traj, " ".join([restraint.mask1, restraint.mask2, restraint.mask3])
             ),
-            units=unit.degrees,
-        )
+            units=openff_unit.degrees,
+        ).to(angle_unit)
 
     elif restraint.mask1 and restraint.mask2 and restraint.mask3 and restraint.mask4:
-        data = unit.Quantity(
+        data = openff_unit.Quantity(
             pt.dihedral(
                 traj,
                 " ".join(
                     [restraint.mask1, restraint.mask2, restraint.mask3, restraint.mask4]
                 ),
             ),
-            units=unit.degrees,
-        )
+            units=openff_unit.degrees,
+        ).to(angle_unit)
 
     return data
 
@@ -1694,6 +1750,7 @@ def ref_state_work(
     b_tg,
     g_fc,
     g_tg,
+    energy_unit=openff_unit.kcal / openff_unit.mole,
 ):
     """
     Computes the free energy to release a molecule from some restrained translational
@@ -1730,48 +1787,59 @@ def ref_state_work(
 
     Parameters
     ----------
-    temperature : unit.Quantity
+    temperature : openff.unit.Quantity
         The temperature (in Kelvin) at which the reference state calculation will take place.
-    r_fc: unit.Quantity
+    r_fc: openff.unit.Quantity
         The distance, :math:`r`, restraint force constant (kcal/mol-Å²).
-    r_tg : unit.Quantity
+    r_tg : openff.unit.Quantity
         The distance, :math:`r`, restraint target values (Å). The target range is 0 to infinity.
-    th_fc : unit.Quantity
+    th_fc : openff.unit.Quantity
         The angle, :math:`θ`, restraint force constant (kcal/mol-radian²).
-    th_tg : unit.Quantity
+    th_tg : openff.unit.Quantity
         The angle, :math:`θ`, restraint target values (radian). The target range is 0 to π.
-    ph_fc : unit.Quantity
+    ph_fc : openff.unit.Quantity
         The torsion, :math:`\\phi`, restraint force constant (kcal/mol-radian²).
-    ph_tg : unit.Quantity
+    ph_tg : openff.unit.Quantity
         The torsion, :math:`\\phi`, restraint target values (radian). The target range is 0 to 2π.
-    a_fc : unit.Quantity
+    a_fc : openff.unit.Quantity
         The torsion, :math:`α`, restraint force constant (kcal/mol-radian²).
-    a_tg: unit.Quantity
+    a_tg: openff.unit.Quantity
         The torsion, :math:`α`, restraint target values (radian). The target range is 0 to 2π.
-    b_fc : unit.Quantity
+    b_fc : openff.unit.Quantity
         The angle, :math:`β`, restraint force (kcal/mol-radian²).
-    b_tg : unit.Quantity
+    b_tg : openff.unit.Quantity
         The angle, :math:`β`, restraint target values (radian). The target range is 0 to π.
-    g_fc: unit.Quantity
+    g_fc: openff.unit.Quantity
         The angle, :math:`γ`, restraint force (kcal/mol-radian²).
-    g_tg: unit.Quantity
+    g_tg: openff.unit.Quantity
         The angle, :math:`γ`, restraint target values (radian). The target range is 0 to 2π.
+    energy_unit: openff.unit.Quantity
+        The unit for the output free energy.
 
     Returns
     -------
-    RT * np.log(trans * orient): float
-        The free energy associated with releasing the restraints (in kcal/mol Pint units).
+    RT * np.log(trans * orient): openff.unit.Quantity
+        The free energy associated with releasing the restraints (in kcal/mol openff units).
     """
 
-    R = 1.987204118e-3 * unit.kcal / unit.mole / unit.kelvin
-    RT = R * temperature
+    # Convert all distances and angles to units
+    distance_unit = openff_unit.angstrom
+    angle_unit = openff_unit.radian
+
+    R = 1.987204118e-3 * openff_unit.kcal / openff_unit.mole / openff_unit.kelvin
+    RT = (R * temperature).to(energy_unit)
 
     # Distance Integration Function
     def dist_int(RT, fc, targ):
         def potential(arange, RT, fc, targ):
             return (arange**2) * np.exp((-1.0 / RT) * fc * (arange - targ) ** 2)
 
-        arange = np.arange(0.0, 100.0, 0.0001) * unit.angstrom
+        targ = targ.to(distance_unit)
+        fc = fc.to(energy_unit / distance_unit**2)
+        arange = (np.arange(0.0, 100.0, 0.0001) * openff_unit.angstrom).to(
+            distance_unit
+        )
+
         return np.trapz(potential(arange, RT, fc, targ), arange)
 
     # Angle Integration Function
@@ -1779,7 +1847,10 @@ def ref_state_work(
         def potential(arange, RT, fc, targ):
             return np.sin(arange) * np.exp((-1.0 / RT) * fc * (arange - targ) ** 2)
 
-        arange = np.arange(0.0, np.pi, 0.00005) * unit.radians
+        targ = targ.to(angle_unit)
+        fc = fc.to(energy_unit / angle_unit**2)
+        arange = (np.arange(0.0, np.pi, 0.00005) * openff_unit.radians).to(angle_unit)
+
         return np.trapz(potential(arange, RT, fc, targ), arange)
 
     # Torsion Integration Function
@@ -1788,8 +1859,13 @@ def ref_state_work(
             return np.exp((-1.0 / RT) * fc * (arange - targ) ** 2)
 
         # Note, because of periodicity, I'm gonna wrap +/- pi around target for integration.
-        targ = targ.to(unit.radians).magnitude
-        arange = np.arange(targ - np.pi, targ + np.pi, 0.00005) * unit.radians
+        targ = targ.to(angle_unit)
+        fc = fc.to(energy_unit / angle_unit**2)
+        arange = (
+            np.arange(targ.magnitude - np.pi, targ.magnitude + np.pi, 0.00005)
+            * openff_unit.radians
+        ).to(angle_unit)
+
         return np.trapz(potential(arange, RT, fc, targ), arange)
 
     # Distance restraint, r
@@ -1806,13 +1882,13 @@ def ref_state_work(
 
     # Torsion restraint, phi
     if None in [ph_fc, ph_tg]:
-        ph_int = 2.0 * np.pi * unit.radians
+        ph_int = 2.0 * np.pi * openff_unit.radians
     else:
         ph_int = tors_int(RT, ph_fc, ph_tg)
 
     # Torsion restraint, alpha
     if None in [a_fc, a_tg]:
-        a_int = 2.0 * np.pi * unit.radians
+        a_int = 2.0 * np.pi * openff_unit.radians
     else:
         a_int = tors_int(RT, a_fc, a_tg)
 
@@ -1824,12 +1900,12 @@ def ref_state_work(
 
     # Torsion restraint, gamma
     if None in [g_fc, g_tg]:
-        g_int = 2.0 * np.pi * unit.radians
+        g_int = 2.0 * np.pi * openff_unit.radians
     else:
         g_int = tors_int(RT, g_fc, g_tg)
 
     # Concentration term
-    V0 = 1660.5392 * unit.angstrom**3
+    V0 = 1660.5392 * openff_unit.angstrom**3
     translational = r_int * th_int * ph_int * (1.0 / V0)  # C^o = 1/V^o
 
     # Orientational term
@@ -1849,9 +1925,9 @@ def integrate_bootstraps(x, ys, x_intp=None, matrix="full"):
     x: :class:`np.array`
         The x coordinate of the curve to be integrated.
     ys: :class:`np.array`
-        Two dimensional array in which the first dimension is bootcycles and the second
+        Two dimensional array in which the first dimension is boot_cycles and the second
         dimension contains the arrays of y values which correspond to the x values and will
-        be used for integration. The shape of this is :code:`(bootcycles, len(x))`.
+        be used for integration. The shape of this is :code:`(boot_cycles, len(x))`.
     x_intp: :class:`np.array`, optional, default=None
         An array which finely interpolates the x values. If not provided, it will be generated
         by adding 100 evenly spaced points between each x value. Default: None.
