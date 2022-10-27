@@ -231,8 +231,18 @@ def init(args):
 
     logger.info('align complex')
 
-    G1 = f":LIG@{args.g1}"
-    G2 = f":LIG@{args.g2}"
+    guest_mask = ":LIG"
+    if args.guest_resname and args.guest_resnr:
+        guest_mask = f":{args.guest_resnr}&:{args.guest_resname}"
+    elif args.guest_resname:
+        guest_mask = f":{args.guest_resname}"
+    elif args.guest_resnr:
+        guest_mask = f":{args.guest_resnr}"
+
+    G1 = f"{guest_mask}&@{args.g1}"
+    G2 = f"{guest_mask}&@{args.g2}"
+
+    print(G1, G2)
 
     structure = pmd.load_file('complex/vac.prmtop', 'complex/vac.rst7', structure=True)
 
@@ -287,21 +297,29 @@ def init(args):
     print(f"There are {windows} windows in this attach-pull-release calculation.")
 
     # compute host anchor atoms
-
     structure = pmd.load_file("complex/apr.prmtop", "complex/apr.rst7")
-    structure.save("complex/apr_pmd.pdb", overwrite=True)
+
+    host_mask = ":MOL"
+    if args.host_resname and args.host_resnr:
+        host_mask = f":{args.host_resnr}&:{args.host_resname}"
+    elif args.host_resname:
+        host_mask = f":{args.host_resname}"
+    elif args.host_resnr:
+        host_mask = f":{args.host_resnr}"
+
+    structure[host_mask].save("complex/apr_pmd.pdb", overwrite=True)
     host_mol = Chem.MolFromPDBFile(str(system_path/"apr_pmd.pdb"), removeHs=False)
     p_monomer = Chem.MolFromSmarts("O1C(O)CCCC1")
     monomers = host_mol.GetSubstructMatches(p_monomer)
 
     if args.h1 and args.h2 and args.h3:
-        H1 = f":MOL@{args.h1}"
-        H2 = f":MOL@{args.h2}"
-        H3 = f":MOL@{args.h3}"
+        H1 = f"{host_mask}&@{args.h1}"
+        H2 = f"{host_mask}&@{args.h2}"
+        H3 = f"{host_mask}&@{args.h3}"
     else:
-        H1 = f":MOL@{monomers[0][1]+1}"
-        H2 = f":MOL@{monomers[2][1]+1}"
-        H3 = f":MOL@{monomers[-2][1]+1}"
+        H1 = f"{host_mask}&@{monomers[0][1]+1}"
+        H2 = f"{host_mask}&@{monomers[2][1]+1}"
+        H3 = f"{host_mask}&@{monomers[-2][1]+1}"
 
     print(H1, H2, H3)
 
@@ -314,9 +332,9 @@ def init(args):
     host_restraints = []
 
     for i, m in enumerate(monomers):
-        O5 = f":MOL@{monomers[i][0]+1}"
-        C1 = f":MOL@{monomers[i][1]+1}"
-        O1 = f":MOL@{monomers[i][2]+1}"
+        O5 = f"{host_mask}@{monomers[i][0]+1}"
+        C1 = f"{host_mask}@{monomers[i][1]+1}"
+        O1 = f"{host_mask}@{monomers[i][2]+1}"
 
         o1 = host_mol.GetAtomWithIdx(monomers[i][2])
         neighbor = [n.GetIdx() for n in o1.GetNeighbors() if n.GetIdx() not in monomers[i]].pop()
@@ -325,8 +343,8 @@ def init(args):
             if neighbor in monomers[j]:
                 break
 
-        C4n = f":MOL@{monomers[j][5]+1}"
-        C5n = f":MOL@{monomers[j][6]+1}"
+        C4n = f"{host_mask}@{monomers[j][5]+1}"
+        C5n = f"{host_mask}@{monomers[j][6]+1}"
 
         print(O5, C1, O1, C4n, C5n)
 
@@ -476,9 +494,8 @@ def init(args):
             structure = pmd.load_file("complex/apr.prmtop", "complex/apr.rst7", structure = True)
             target_difference = guest_restraints[0].phase['pull']['targets'][int(window[1:])].magnitude + d0
 
-            for atom in structure.atoms:
-                if atom.residue.name == 'LIG':
-                    atom.xz += target_difference
+            for atom in structure.view[guest_mask].atoms:
+                atom.xz += target_difference
             structure.save(str(folder/"apr.prmtop"), overwrite=True)
             structure.save(str(folder/"apr.rst7"), overwrite=True)
 
@@ -486,9 +503,8 @@ def init(args):
             structure = pmd.load_file("complex/apr.prmtop", "complex/apr.rst7", structure = True)
             target_difference = final_distance + d0
 
-            for atom in structure.atoms:
-                if atom.residue.name == 'LIG':
-                    atom.xz += target_difference
+            for atom in structure.view[guest_mask].atoms:
+                atom.xz += target_difference
             structure.save(str(folder/"apr.prmtop"), overwrite=True)
             structure.save(str(folder/"apr.rst7"), overwrite=True)
 

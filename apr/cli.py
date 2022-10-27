@@ -36,6 +36,10 @@ def main():
     parser_init.add_argument('--k_dist', type=float, default=6.0, help="force constance for distance restraint")
     parser_init.add_argument('--conc', type=float, default=50.0, help="ion concentration (mM)")
     parser_init.add_argument('--nwater', type=int, default=2500)
+    parser_init.add_argument('--host_resname', required=False, help='host residue name (default: LIG)')
+    parser_init.add_argument('--host_resnr', required=False, help='host residue number (default: None)')
+    parser_init.add_argument('--guest_resname', required=False, help='guest residue name (default: LIG)')
+    parser_init.add_argument('--guest_resnr', required=False, help='guest residue number (default: None)')
     parser_init.set_defaults(func=init)
 
     # create the parser for the "run" command
