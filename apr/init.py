@@ -43,6 +43,16 @@ def antechamber(input, format, output_path, pl=-1, overwrite=False):
                '-o', f'{output_mol2}', '-c', 'bcc', '-s', '2', '-at', 'gaff2']
         if pl > 0:
             cmd += ['-pl', f'{pl:d}']
+
+        if format == 'sdf':
+            m = Chem.MolFromMolFile(str(input_path))
+        elif format == 'mol2':
+            m = Chem.MolFromMol2File(str(input_path))
+        charge = Chem.GetFormalCharge(m)
+        if charge != 0:
+            cmd += ['-nc', f'{charge:d}']
+        print(cmd)
+
         os.system(' '.join(cmd))
         assert Path(output_mol2).exists()
 
