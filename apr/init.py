@@ -10,6 +10,12 @@ import openmm.app as app
 import openmm as openmm
 import parmed as pmd
 from rdkit import Chem
+from rdkit.Chem.rdFMCS import FindMCS
+import yaml
+try:
+    from yaml import CLoader as Loader
+except ImportError:
+    from yaml import Loader
 
 from paprika.build import align
 from paprika.build import dummy
@@ -27,7 +33,7 @@ from restraints import *
 logger = logging.getLogger("init")
 
 
-def antechamber(input, format, output_path, pl=-1, overwrite=False):
+def antechamber(input, format, output_path, pl=-1, overwrite=False, resname='MOL'):
     output_mol2 = f'{input.stem}.gaff2.mol2'
     output_frcmod = f'{input.stem}.frcmod'
     input_path = input.resolve()
@@ -40,7 +46,8 @@ def antechamber(input, format, output_path, pl=-1, overwrite=False):
 
     if not Path(output_mol2).exists() or overwrite:
         cmd = ['antechamber', '-fi', format, '-fo', 'mol2', '-i', str(input_path),
-               '-o', f'{output_mol2}', '-c', 'bcc', '-s', '2', '-at', 'gaff2']
+               '-o', f'{output_mol2}', '-c', 'bcc', '-s', '2', '-at', 'gaff2',
+               '-rn', resname]
         if pl > 0:
             cmd += ['-pl', f'{pl:d}']
 
@@ -173,7 +180,72 @@ def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, num_wate
     system.repartition_hydrogen_mass()
 
 
+def parse_config(args):
+    config = yaml.load(open(args.config).read(), Loader=Loader)
+    args.host = config['host']
+    args.guest = config['guest']
+    args.complex = config['complex']
+    args.g1 = config['anchor']['g1']
+    args.g2 = config['anchor']['g2']
+
+
+def parse_mol2_atomnames(mol2file):
+    _in = False
+    atomnames = []
+    for line in open(mol2file):
+        if line.startswith("@<TRIPOS>ATOM"):
+            _in = True
+            continue
+        if _in:
+            if line.startswith('@'):
+                break
+            atomname = line.split()[1]
+            atomnames.append(atomname)
+    return atomnames
+
+
+def match_host_atomnames(host, guest, complex, matched_complex_pdb):
+    host_m = Chem.MolFromMolFile(str(host), removeHs=False)
+    guest_m = Chem.MolFromMolFile(str(guest), removeHs=False)
+    complex_m = Chem.MolFromPDBFile(str(complex), removeHs=False)
+    complex_host, complex_guest = Chem.GetMolFrags(complex_m, asMols=True)
+
+    ref = host_m
+    target = complex_host
+    gaff_mol2 = host.parent/'gaff2'/f'{host.stem}.gaff2.mol2'
+
+    mcs = FindMCS([ref, target])
+    ref_aids = ref.GetSubstructMatch(mcs.queryMol)
+    target_aids = target.GetSubstructMatch(mcs.queryMol)
+    atomnames = parse_mol2_atomnames(gaff_mol2)
+    for aid1, aid2 in zip(ref_aids, target_aids):
+        a1 = ref.GetAtomWithIdx(aid1)
+        a2 = target.GetAtomWithIdx(aid2)
+        atomname = atomnames[aid1]
+        a2.GetPDBResidueInfo().SetName('{:>4}'.format('{:<3}'.format(atomname)))
+
+    ref = guest_m
+    target = complex_guest
+    gaff_mol2 = guest.parent/'gaff2'/f'{guest.stem}.gaff2.mol2'
+
+    mcs = FindMCS([ref, target])
+    ref_aids = ref.GetSubstructMatch(mcs.queryMol)
+    target_aids = target.GetSubstructMatch(mcs.queryMol)
+    atomnames = parse_mol2_atomnames(gaff_mol2)
+    for aid1, aid2 in zip(ref_aids, target_aids):
+        a1 = ref.GetAtomWithIdx(aid1)
+        a2 = target.GetAtomWithIdx(aid2)
+        atomname = atomnames[aid1]
+        a2.GetPDBResidueInfo().SetName('{:>4}'.format('{:<3}'.format(atomname)))
+
+    complex = Chem.CombineMols(complex_host, complex_guest)
+    Chem.MolToPDBFile(complex, str(matched_complex_pdb))
+
+
 def init(args):
+    if args.config:
+        parse_config(args)
+
     host = Path(args.host)
     guest = Path(args.guest)
     complex = Path(args.complex)
@@ -185,7 +257,7 @@ def init(args):
     host_top = host_par_path/f'{hostname}.prmtop'
     host_format = host.suffix[1:]
     if not host_top.exists():
-        antechamber(host, host_format, host_par_path, 10, args.overwrite)
+        antechamber(host, host_format, host_par_path, 10, args.overwrite, resname=hostname)
 
     if host_format == 'mol2':
         host_mol = Chem.MolFromMol2File(str(host))
@@ -207,7 +279,7 @@ def init(args):
         guest_par_path = guest.parent/'gaff2'
         guest_top = guest_par_path/f'{guestname}.prmtop'
         if not guest_top.exists():
-            antechamber(guest, guest.suffix[1:], guest_par_path, overwrite=args.overwrite)
+            antechamber(guest, guest.suffix[1:], guest_par_path, overwrite=args.overwrite, resname=guestname)
 
     info = {
         'host': {
@@ -225,13 +297,17 @@ def init(args):
     }
 
     logger.info('build complex system')
+
     
     system_path = Path('complex')
     system_rst = system_path/'vac.rst7'
     system_top = system_path/'vac.prmtop'
     system_pdb = system_path/'vac.pdb'
     if not system_top.exists():
-        build(info, complex, system_path, system_top, system_rst, system_pdb)
+        system_path.mkdir(exist_ok=True)
+        matched_complex_pdb = system_path/'complex.pdb'
+        match_host_atomnames(host, guest, complex, matched_complex_pdb)
+        build(info, matched_complex_pdb, system_path, system_top, system_rst, system_pdb)
 
     info['system'] = {
         'top': str(system_top),
@@ -241,7 +317,11 @@ def init(args):
 
     logger.info('align complex')
 
-    guest_mask = ":LIG"
+    if guestname.upper() == 'CHL':
+        guest_mask = ":CHL"
+    else:
+        guest_mask = ":LIG"
+
     if args.guest_resname and args.guest_resnr:
         guest_mask = f":{args.guest_resnr}&:{args.guest_resname}"
     elif args.guest_resname:

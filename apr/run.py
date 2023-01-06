@@ -1,6 +1,7 @@
 from pathlib import Path
 import logging
 import os
+import shutil
 
 import openmm.unit as unit
 import openmm.app as app
@@ -15,6 +16,8 @@ def run_equilibration(folder, args, enforcePBC=True):
     if Path(f'{folder}/equilibration.rst').exists():
         return
 
+    temp = 310 * unit.kelvin
+
     logger.info(f"Running minimization in window {folder}...")
     print(f"Running minimization in window {folder}...")
 
@@ -24,18 +27,18 @@ def run_equilibration(folder, args, enforcePBC=True):
     coords = app.PDBFile(os.path.join(folder, 'system.pdb'))
 
     if not args.implicit:
-        system.addForce(openmm.AndersenThermostat(300*unit.kelvin, 1/unit.picosecond))
-        system.addForce(openmm.MonteCarloBarostat(1*unit.bar, 300*unit.kelvin))
+        system.addForce(openmm.AndersenThermostat(temp, 1/unit.picosecond))
+        system.addForce(openmm.MonteCarloBarostat(1*unit.bar, temp))
 
     # Integrator
-    integrator = openmm.LangevinMiddleIntegrator(300 * unit.kelvin, 1.0 / unit.picoseconds, 2.0 * unit.femtoseconds)
+    integrator = openmm.LangevinMiddleIntegrator(temp, 1.0 / unit.picoseconds, 2.0 * unit.femtoseconds)
 
     # Simulation Object
     simulation = app.Simulation(coords.topology, system, integrator)
     simulation.context.setPositions(coords.positions)
 
     # Minimize Energy
-    simulation.minimizeEnergy(tolerance=1.0*unit.kilojoules_per_mole, maxIterations=10000)
+    simulation.minimizeEnergy(tolerance=1.0*unit.kilojoules_per_mole, maxIterations=20000)
 
     # Save final coordinates
     positions = simulation.context.getState(getPositions=True).getPositions()
@@ -58,7 +61,7 @@ def run_equilibration(folder, args, enforcePBC=True):
     )
 
     # Simulation Object
-    simulation.context.setVelocitiesToTemperature(300)
+    simulation.context.setVelocitiesToTemperature(temp)
     simulation.reporters.append(state_reporter)
 
     # MD steps
@@ -88,6 +91,8 @@ def run_production(folder, args, enforcePBC=True):
         else:
             return
 
+    temp = 310 * unit.kelvin
+
     logger.info(f"Running production in window {folder}...")
     print(f"Running production in window {folder}...")
 
@@ -97,15 +102,15 @@ def run_production(folder, args, enforcePBC=True):
     coords = app.PDBFile(os.path.join(folder, 'minimized.pdb'))
 
     if not args.implicit:
-        system.addForce(openmm.AndersenThermostat(300*unit.kelvin, 1/unit.picosecond))
-        system.addForce(openmm.MonteCarloBarostat(1*unit.bar, 300*unit.kelvin))
+        system.addForce(openmm.AndersenThermostat(temp, 1/unit.picosecond))
+        system.addForce(openmm.MonteCarloBarostat(1*unit.bar, temp))
         timestep = 4.0 * unit.femtoseconds
 
     else:
         timestep = 2.0 * unit.femtoseconds
 
     # Integrator
-    integrator = openmm.LangevinIntegrator(300 * unit.kelvin, 1.0 / unit.picoseconds, timestep)
+    integrator = openmm.LangevinIntegrator(temp, 1.0 / unit.picoseconds, timestep)
 
     # Reporters
     dcd_reporter = app.DCDReporter(os.path.join(folder, f'{prefix}.dcd'), 2500)
@@ -149,14 +154,23 @@ def run(args):
     if args.implicit:
         enforcePBC = False
 
-    for window in window_list:
-        folder = os.path.join('windows', window)
+    if args.equilibrate:
+        for i, window in enumerate(window_list):
+            folder = Path(os.path.join('windows', window))
+            if i > 0:
+                prev = window_list[i-1]
+                prev_folder = Path(os.path.join('windows', prev))
+                shutil.copy(prev_folder/'equilibration.pdb', folder/'system.pdb')
+            run_equilibration(folder, args, enforcePBC)
 
-        print(args.window, window)
-        if args.window != 'all' and args.window != window:
-            continue
-
-        run_equilibration(folder, args, enforcePBC)
-        run_production(folder, args, enforcePBC)
-
-
+    else:
+        for window in window_list:
+            folder = os.path.join('windows', window)
+    
+            if args.window != 'all' and args.window != window:
+                continue
+    
+            run_equilibration(folder, args, enforcePBC)
+            run_production(folder, args, enforcePBC)
+    
+    
