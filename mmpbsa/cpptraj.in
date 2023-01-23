@@ -1,0 +1,4 @@
+parm prmtop
+parm prmtop [top1]
+trajin dcd 501 last 10
+trajout mdcrd [top1]

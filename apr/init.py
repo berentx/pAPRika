@@ -33,8 +33,8 @@ from restraints import *
 logger = logging.getLogger("init")
 
 
-def antechamber(input, format, output_path, pl=-1, overwrite=False, resname='MOL'):
-    output_mol2 = f'{input.stem}.gaff2.mol2'
+def antechamber(input, format, output_path, pl=-1, overwrite=False, gaff='gaff2', resname='MOL'):
+    output_mol2 = f'{input.stem}.{gaff}.mol2'
     output_frcmod = f'{input.stem}.frcmod'
     input_path = input.resolve()
 
@@ -46,7 +46,7 @@ def antechamber(input, format, output_path, pl=-1, overwrite=False, resname='MOL
 
     if not Path(output_mol2).exists() or overwrite:
         cmd = ['antechamber', '-fi', format, '-fo', 'mol2', '-i', str(input_path),
-               '-o', f'{output_mol2}', '-c', 'bcc', '-s', '2', '-at', 'gaff2',
+               '-o', f'{output_mol2}', '-c', 'bcc', '-s', '2', '-at', gaff,
                '-rn', resname]
         if pl > 0:
             cmd += ['-pl', f'{pl:d}']
@@ -58,21 +58,21 @@ def antechamber(input, format, output_path, pl=-1, overwrite=False, resname='MOL
         charge = Chem.GetFormalCharge(m)
         if charge != 0:
             cmd += ['-nc', f'{charge:d}']
-        print(cmd)
+        #print(cmd)
 
         os.system(' '.join(cmd))
         assert Path(output_mol2).exists()
 
     if not Path(output_frcmod).exists() or overwrite:
         cmd = ['parmchk2', '-i', str(output_mol2), '-f', 'mol2', '-o', str(output_frcmod),
-               '-s', 'gaff2']
+               '-s', gaff]
         os.system(' '.join(cmd))
         assert Path(output_frcmod).exists()
 
     os.chdir(cwd)
 
 
-def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, dummy=False):
+def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, dummy=False, gaff='gaff2'):
     from paprika.build.system import TLeap
 
     system = TLeap()
@@ -84,13 +84,15 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
     host_name = info['host']['name']
     
     system.template_lines = [
-        "source leaprc.gaff2",
+        f"source leaprc.{gaff}",
         "source leaprc.lipid21",
     ]
 
     system.template_lines += [
         f"loadamberparams {host_dir}/{host_name}.frcmod",
-        f"MOL = loadmol2 {host_dir}/{host_name}.gaff2.mol2",
+        f"MOL = loadmol2 {host_dir}/{host_name}.{gaff}.mol2",
+        f"saveamberparm MOL {host_dir}/{host_name}.prmtop {host_dir}/{host_name}.rst7",
+        f"savepdb MOL {host_dir}/{host_name}.pdb",
     ]
 
     if info['guest']['par_path'] != 'None':
@@ -98,7 +100,9 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
         guest_name = info['guest']['name']
         system.template_lines += [
             f"loadamberparams {guest_dir}/{guest_name}.frcmod",
-            f"LIG = loadmol2 {guest_dir}/{guest_name}.gaff2.mol2",
+            f"LIG = loadmol2 {guest_dir}/{guest_name}.{gaff}.mol2",
+            f"saveamberparm LIG {guest_dir}/{guest_name}.prmtop {guest_dir}/{guest_name}.rst7",
+            f"savepdb LIG {guest_dir}/{guest_name}.pdb",
         ]
 
     if dummy:
@@ -122,7 +126,7 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
     assert Path(system_pdb).exists()
 
 
-def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, num_waters, ion_conc, dummy=True):
+def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, num_waters, ion_conc, dummy=True, gaff='gaff2'):
     from paprika.build.system import TLeap
 
     system = TLeap()
@@ -145,14 +149,14 @@ def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, num_wate
     complex_pdb = Path(complex_pdb)
     
     system.template_lines = [
-        "source leaprc.gaff2",
+        f"source leaprc.{gaff}",
         "source leaprc.lipid21",
         #"source leaprc.water.tip3p",
     ]
 
     system.template_lines += [
         f"loadamberparams {host_dir}/{host_name}.frcmod",
-        f"MOL = loadmol2 {host_dir}/{host_name}.gaff2.mol2",
+        f"MOL = loadmol2 {host_dir}/{host_name}.{gaff}.mol2",
     ]
 
     if info['guest']['par_path'] != 'None':
@@ -160,7 +164,7 @@ def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, num_wate
         guest_name = info['guest']['name']
         system.template_lines += [
             f"loadamberparams {guest_dir}/{guest_name}.frcmod",
-            f"LIG = loadmol2 {guest_dir}/{guest_name}.gaff2.mol2",
+            f"LIG = loadmol2 {guest_dir}/{guest_name}.{gaff}.mol2",
         ]
 
     if dummy:
@@ -204,7 +208,7 @@ def parse_mol2_atomnames(mol2file):
     return atomnames
 
 
-def match_host_atomnames(host, guest, complex, matched_complex_pdb):
+def match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2'):
     host_m = Chem.MolFromMolFile(str(host), removeHs=False)
     guest_m = Chem.MolFromMolFile(str(guest), removeHs=False)
     complex_m = Chem.MolFromPDBFile(str(complex), removeHs=False)
@@ -212,7 +216,7 @@ def match_host_atomnames(host, guest, complex, matched_complex_pdb):
 
     ref = host_m
     target = complex_host
-    gaff_mol2 = host.parent/'gaff2'/f'{host.stem}.gaff2.mol2'
+    gaff_mol2 = host.parent/gaff/f'{host.stem}.{gaff}.mol2'
 
     mcs = FindMCS([ref, target])
     ref_aids = ref.GetSubstructMatch(mcs.queryMol)
@@ -226,7 +230,7 @@ def match_host_atomnames(host, guest, complex, matched_complex_pdb):
 
     ref = guest_m
     target = complex_guest
-    gaff_mol2 = guest.parent/'gaff2'/f'{guest.stem}.gaff2.mol2'
+    gaff_mol2 = guest.parent/gaff/f'{guest.stem}.{gaff}.mol2'
 
     mcs = FindMCS([ref, target])
     ref_aids = ref.GetSubstructMatch(mcs.queryMol)
@@ -249,15 +253,16 @@ def init(args):
     host = Path(args.host)
     guest = Path(args.guest)
     complex = Path(args.complex)
+    gaff = args.gaff
 
     logger.info('preparing host parameters')
 
     hostname = host.stem
-    host_par_path = host.parent/'gaff2'
+    host_par_path = host.parent/gaff
     host_top = host_par_path/f'{hostname}.prmtop'
     host_format = host.suffix[1:]
     if not host_top.exists():
-        antechamber(host, host_format, host_par_path, 10, args.overwrite, resname=hostname)
+        antechamber(host, host_format, host_par_path, 10, args.overwrite, resname='MOL', gaff=gaff)
 
     if host_format == 'mol2':
         host_mol = Chem.MolFromMol2File(str(host))
@@ -272,14 +277,15 @@ def init(args):
     logger.info('preparing guest parameters')
 
     guestname = guest.stem
-    if guestname.upper() == 'CHL':
+    if guestname.upper() == 'CHL1':
         guest_par_path = None
         guest_top = None
     else:
-        guest_par_path = guest.parent/'gaff2'
+        guest_par_path = guest.parent/gaff
         guest_top = guest_par_path/f'{guestname}.prmtop'
         if not guest_top.exists():
-            antechamber(guest, guest.suffix[1:], guest_par_path, overwrite=args.overwrite, resname=guestname)
+            antechamber(guest, guest.suffix[1:], guest_par_path, overwrite=args.overwrite,
+                        resname=guestname, gaff=args.gaff)
 
     info = {
         'host': {
@@ -306,8 +312,8 @@ def init(args):
     if not system_top.exists():
         system_path.mkdir(exist_ok=True)
         matched_complex_pdb = system_path/'complex.pdb'
-        match_host_atomnames(host, guest, complex, matched_complex_pdb)
-        build(info, matched_complex_pdb, system_path, system_top, system_rst, system_pdb)
+        match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff=gaff)
+        build(info, matched_complex_pdb, system_path, system_top, system_rst, system_pdb, gaff=gaff)
 
     info['system'] = {
         'top': str(system_top),
@@ -317,7 +323,7 @@ def init(args):
 
     logger.info('align complex')
 
-    if guestname.upper() == 'CHL':
+    if guestname.upper() == 'CHL1':
         guest_mask = ":CHL"
     else:
         guest_mask = ":LIG"
@@ -367,7 +373,7 @@ def init(args):
     system_top = system_path/'apr.prmtop'
     system_pdb = system_path/'apr.pdb'
     if not system_top.exists():
-        build(info, complex, system_path, system_top, system_rst, system_pdb, dummy=True)
+        build(info, complex, system_path, system_top, system_rst, system_pdb, dummy=True, gaff=gaff)
 
     logger.info("setup restraints")
 
@@ -606,7 +612,8 @@ def init(args):
             prefix = 'apr-solvated'
             structure = pmd.load_file(str(folder/"apr.prmtop"), str(folder/"apr.rst7"))
             structure.save(str(folder/"apr.pdb"), overwrite=True)
-            solvate(info, str(folder/"apr.pdb"), 'complex', folder, prefix, num_waters=args.nwater, ion_conc=(args.conc/1000.0))
+            solvate(info, str(folder/"apr.pdb"), 'complex', folder, prefix, num_waters=args.nwater,
+                    ion_conc=(args.conc/1000.0), gaff=gaff)
 
         # Load Amber
         prmtop = app.AmberPrmtopFile(str(folder/f'{prefix}.prmtop'))

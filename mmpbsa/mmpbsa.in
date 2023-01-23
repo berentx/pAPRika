@@ -1,0 +1,15 @@
+&general
+startframe=1,
+endframe=6000,
+interval=1,
+verbose=2,
+keep_files=2,
+entropy=1,
+strip_mask=:DM1:DM2:DM3:WAT:Cl-:CIO:Cs+:IB:K+:Li+:MG2:Na+:Rb+
+/
+&gb
+igb=5,
+saltcon=0.10,
+/
+&pb
+istrng=0.100,

@@ -1,0 +1,6 @@
+host: host/host.sdf
+guest: guest/guest.sdf
+complex: complex.pdb
+anchor:
+  g1: O1
+  g2: C4

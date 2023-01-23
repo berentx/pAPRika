@@ -16,7 +16,7 @@ def run_equilibration(folder, args, enforcePBC=True):
     if Path(f'{folder}/equilibration.rst').exists():
         return
 
-    temp = 300 * unit.kelvin
+    temp = 310 * unit.kelvin
 
     logger.info(f"Running minimization in window {folder}...")
     print(f"Running minimization in window {folder}...")
@@ -91,7 +91,7 @@ def run_production(folder, args, enforcePBC=True):
         else:
             return
 
-    temp = 300 * unit.kelvin
+    temp = 310 * unit.kelvin
 
     logger.info(f"Running production in window {folder}...")
     print(f"Running production in window {folder}...")
