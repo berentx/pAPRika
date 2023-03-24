@@ -52,6 +52,7 @@ def main():
     parser_run.add_argument('--window', type=str, default="all")
     parser_run.add_argument('--extend', action='store_true')
     parser_run.add_argument('--equilibrate', action='store_true')
+    parser_run.add_argument('--final', action='store_true')
     parser_run.set_defaults(func=run)
 
     # create the parser for the "analysis" command

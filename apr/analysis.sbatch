@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --partition cpu
+#SBATCH --partition c5a
 #SBATCH --nodes 1
-#SBATCH --ntasks 2
+#SBATCH --ntasks 1
 
 path=/shared/compounds/pAPRika/
 
@@ -24,7 +24,7 @@ cp ${path}/mmpbsa/mmpbsa.in .
 
 MMPBSA.py -i mmpbsa.in -o mmpbsa.dat -cp complex/vac.prmtop \
 	  -sp $prmtop -y $mdcrd \
-	  -rp complex/receptor.prmtop -lp complex/ligand.prmtop
+	  -rp complex/receptor.prmtop -lp complex/ligand.prmtop > mmpbsa.dat
 
 rm -f ${mdcrd} _MMPBSA*
 

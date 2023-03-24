@@ -30,7 +30,7 @@ def main():
     parser_init.add_argument('--r0', type=float, default=6.0, help="initial distance")
     parser_init.add_argument('--r1', type=float, default=28.0, help="final distance")
     parser_init.add_argument('--conc', type=float, default=10.0, help="ion concentration (mM)")
-    parser_init.add_argument('--nwater', type=int, default=3500)
+    parser_init.add_argument('--nwater', type=int, default=2500)
     parser_init.add_argument('--host_resname', required=False, help='host residue name (default: MOL)')
     parser_init.add_argument('--host_resnr', required=False, help='host residue number (default: None)')
     parser_init.add_argument('--guest_resname', required=False, help='guest residue name (default: LIG)')

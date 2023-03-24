@@ -52,7 +52,7 @@ def run_equilibration(folder, args, enforcePBC=True):
     # Reporters
     state_reporter = app.StateDataReporter(
         os.path.join(folder, 'equilibration.log'),
-        500,
+        5000,
         step=True,
         kineticEnergy=True,
         potentialEnergy=True,
@@ -65,7 +65,7 @@ def run_equilibration(folder, args, enforcePBC=True):
     simulation.reporters.append(state_reporter)
 
     # MD steps
-    simulation.step(int(0.1 / 0.002 * 1000 + 0.5)) # 100ps
+    simulation.step(int(0.1 / 0.002 * 10000 + 0.5)) # 100ps
 
     # Save final coordinates
     state = simulation.context.getState(getPositions=True, getVelocities=True, enforcePeriodicBox=enforcePBC)
@@ -162,6 +162,21 @@ def run(args):
                 prev_folder = Path(os.path.join('windows', prev))
                 shutil.copy(prev_folder/'equilibration.pdb', folder/'system.pdb')
             run_equilibration(folder, args, enforcePBC)
+
+    elif args.final:
+        for i, window in enumerate(window_list):
+            folder = Path(os.path.join('windows', window))
+            pdb = folder/'production.pdb'
+            if pdb.exists():
+                continue
+
+            prev = window_list[i-1]
+            prev_folder = Path(os.path.join('windows', prev))
+            for p in folder.glob("equilibration.*"):
+                p.unlink()
+            shutil.copy(prev_folder/'production.pdb', folder/'system.pdb')
+            run_equilibration(folder, args, enforcePBC)
+            run_production(folder, args, enforcePBC)
 
     else:
         for window in window_list:

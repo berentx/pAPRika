@@ -42,11 +42,10 @@ from tqdm import tqdm
 logger = logging.getLogger("init")
 
 
-def pdb2pqr(input, format, output_path, pl=-1, overwrite=False, gaff='gaff2', resname='MOL'):
+def pdb2pqr(input, input_pdb, output, gaff='gaff2'):
     input_mol2 = f'{input.stem}.{gaff}.mol2'
-    input_pdb = f'{input.stem}.pdb'
-    output_pqr = f'{input.stem}.pqr'
-    input_path = input.resolve()
+    input_path = input.resolve().parent/gaff
+    output_path = output.parent
 
     cwd = os.getcwd()
     if not output_path.exists():
@@ -54,10 +53,13 @@ def pdb2pqr(input, format, output_path, pl=-1, overwrite=False, gaff='gaff2', re
 
     os.chdir(output_path)
 
-    if not Path(input_mol2).exists() or overwrite:
-        cmd = ['pdb2pqr30', '--ligand', str(output_mol2), f'{input_pdb}', f'{output_pqr}']
+    if not Path(output).exists() or overwrite:
+        cmd = ['sed', '-i', '-e', "'s/ATOM  /HETATM/g'", f'{input_pdb.name}']
         os.system(' '.join(cmd))
-        assert Path(output_pqr).exists()
+        cmd = ['pdb2pqr30', '--assign-only', '--ligand', str(input_path/input_mol2), f'{input_pdb.name}', f'{output.name}']
+        #print(' '.join(cmd))
+        os.system(' '.join(cmd))
+        assert Path(output.name).exists()
 
     os.chdir(cwd)
 
@@ -252,7 +254,7 @@ def init(args):
     host_pqr = host_par_path/f'{hostname}.pqr'
     host_format = host.suffix[1:]
     if not host_pqr.exists():
-        pdb2pqr(host, host_format, host_par_path, 10, args.overwrite, resname='MOL', gaff=gaff)
+        pdb2pqr(host, Path('complex/receptor.pdb'), Path('complex/receptor.pqr'))
 
     if host_format == 'mol2':
         host_mol = Chem.MolFromMol2File(str(host), removeHs=False)
@@ -274,8 +276,7 @@ def init(args):
         guest_par_path = guest.parent/gaff
         guest_pqr = guest_par_path/f'{guestname}.pqr'
         if not guest_pqr.exists():
-            pdb2pqr(guest, guest.suffix[1:], guest_par_path, overwrite=args.overwrite,
-                    resname=guestname, gaff=args.gaff)
+            pdb2pqr(guest, Path('complex/ligand.pdb'), Path('complex/ligand.pqr'))
 
     info = {
         'host': {
@@ -301,8 +302,8 @@ def init(args):
     if calculation_type == "mmvt":
         model_input.calculation_type = "mmvt"
         model_input.calculation_settings = common_prepare.MMVT_input_settings()
-        model_input.calculation_settings.md_output_interval  =    2500
-        model_input.calculation_settings.md_steps_per_anchor = 5000000
+        model_input.calculation_settings.md_output_interval  =     5000
+        model_input.calculation_settings.md_steps_per_anchor = 25000000
 
     elif calculation_type == "elber":
         model_input.calculation_type = "elber"
@@ -318,14 +319,19 @@ def init(args):
         raise Exception("Option not available: %s", calculation_type)
 
     model_input.temperature = 300
-    model_input.run_minimization = True
-    model_input.openmm_settings = base.Openmm_settings()
-    model_input.openmm_settings.hydrogenMass = 4.0
-    model_input.openmm_settings.langevin_integrator = base.Langevin_integrator_settings()
-    model_input.openmm_settings.langevin_integrator.timestep = 0.004
-    model_input.openmm_settings.langevin_integrator.target_temperature = 300
-    model_input.openmm_settings.barostat = base.Barostat_settings_openmm()
-    model_input.openmm_settings.barostat.target_temperature = 300
+    model_input.run_minimization = False
+    model_input.hydrogenMass = 4.0
+    model_input.ensemble = 'npt'
+    model_input.pressure = 1.0
+    model_input.timestep = 0.004
+    model_input.md_program = 'openmm'
+    model_input.integrator_type = 'langevin'
+    #model_input.openmm_settings = base.Openmm_settings()
+    #model_input.openmm_settings.langevin_integrator = base.Langevin_integrator_settings()
+    #model_input.openmm_settings.langevin_integrator.timestep = 0.004
+    #model_input.openmm_settings.langevin_integrator.target_temperature = 300
+    #model_input.openmm_settings.barostat = base.Barostat_settings_openmm()
+    #model_input.openmm_settings.barostat.target_temperature = 300
 
     if guestname.upper() == 'CHL1':
         guest_mask = ":CHL"
@@ -347,14 +353,17 @@ def init(args):
 
     structure = pmd.load_file('complex/complex.pdb', structure=True)
     selection = structure.view[f"{G1},{G2}"].atoms
+    offset = len(structure.view[f":MOL"].atoms)
 
     cv_input1 = common_cv.Spherical_cv_input()
     cv_input1.group1 = list(itertools.chain.from_iterable(monomers))
     cv_input1.group2 = list([a.idx for a in selection])
+    cv_input1.bd_group1 = list(itertools.chain.from_iterable(monomers))
+    cv_input1.bd_group2 = [a.idx-offset for a in selection]
     cv_input1.input_anchors = []
 
     trajfiles = [str(_) for _ in Path('windows').glob('p*/production.dcd')]
-    u = mda.Universe('windows/p001/apr-solvated.pdb', trajfiles, )
+    u = mda.Universe('windows/p001/apr-solvated.pdb', trajfiles)
     r_com = np.empty((u.trajectory.n_frames, 3), dtype=np.float)
     l_com = np.empty((u.trajectory.n_frames, 3), dtype=np.float)
     host_indices = [f'index {i}' for i in cv_input1.group1]
@@ -373,8 +382,9 @@ def init(args):
 
     lower = d0 - 1
     upper = d0
+    dx = 2
 
-    for i in range(1, 15):
+    for i in range(1, 14):
         folder = Path(f'seekr2/inputs')
         folder.mkdir(parents=True, exist_ok=True)
         prefix = f'p{i:03}'
@@ -407,20 +417,20 @@ def init(args):
         cv_input1.input_anchors.append(input_anchor)
 
         lower = upper
-        upper = upper + 1
+        upper = upper + dx
 
     cv_input1.input_anchors[0].bound_state = True
     cv_input1.input_anchors[-1].bulk_anchor = True
     
     model_input.cv_inputs = [cv_input1]
     
-    model_input.browndye_settings = common_prepare.Browndye_settings_input()
-    model_input.browndye_settings.receptor_pqr_filename = f"complex/{hostname}.pqr"
-    model_input.browndye_settings.ligand_pqr_filename = f"complex/{guestname}.pqr"
-    model_input.browndye_settings.apbs_grid_spacing = 0.5
-    model_input.browndye_settings.receptor_indices = list(range(len(structure.view[':MOL'].atoms)))
-    model_input.browndye_settings.ligand_indices = list(range(len(structure.view[':LIG'].atoms)))
-    model_input.browndye_settings.binary_directory = ""
+    model_input.browndye_settings_input = common_prepare.Browndye_settings_input()
+    model_input.browndye_settings_input.receptor_pqr_filename = f"complex/receptor.pqr"
+    model_input.browndye_settings_input.ligand_pqr_filename = f"complex/ligand.pqr"
+    model_input.browndye_settings_input.apbs_grid_spacing = 0.5
+    #model_input.browndye_settings_input.receptor_indices = list(range(len(structure.view[':MOL'].atoms)))
+    #model_input.browndye_settings_input.ligand_indices = list(range(len(structure.view[':LIG'].atoms)))
+    model_input.browndye_settings_input.binary_directory = ""
     
     ion1 = base.Ion()
     ion1.radius = 1.2
@@ -430,9 +440,10 @@ def init(args):
     ion2.radius = 0.9
     ion2.charge = 1.0
     ion2.conc = 0.15
-    model_input.browndye_settings.ions = [ion1, ion2]
-    model_input.browndye_settings.num_bd_milestone_steps = 1000
-    model_input.browndye_settings.num_b_surface_steps = 10000
-    model_input.browndye_settings.n_threads = 1
+    model_input.browndye_settings_input.ions = [ion1, ion2]
+    model_input.browndye_settings_input.num_bd_milestone_steps = 1000
+    model_input.browndye_settings_input.num_b_surface_steps = 10000
+    model_input.browndye_settings_input.num_b_surface_trajectories = 10000
+    model_input.browndye_settings_input.n_threads = 1
     
     model_input.serialize('seekr2.xml')

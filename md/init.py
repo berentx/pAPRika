@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 
 from rdkit import Chem
+from rdkit.Chem.rdFMCS import FindMCS
 
 
 def parse_mol2_atomnames(mol2file):
@@ -73,7 +74,7 @@ def antechamber(input, format, output_path, pl=-1, overwrite=False):
     os.chdir(cwd)
 
 
-def build(info, system_path, system_top, system_rst, system_pdb, dummy=False):
+def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, dummy=False, gaff='gaff2'):
     from paprika.build.system import TLeap
 
     if not system_path.exists():
@@ -89,7 +90,7 @@ def build(info, system_path, system_top, system_rst, system_pdb, dummy=False):
     system.neutralize = False
 
     system.template_lines = [
-        "source leaprc.gaff2",
+        f"source leaprc.{gaff}",
         "source leaprc.lipid21",
         "set default PBRadii mbondi2",
     ]
@@ -97,7 +98,7 @@ def build(info, system_path, system_top, system_rst, system_pdb, dummy=False):
     if has_host:
         host_dir = Path(info['host']['par_path']).resolve()
         host_name = info['host']['name']
-        host_mol2_file = f'{host_dir}/{host_name}.gaff2.mol2'
+        host_mol2_file = f'{host_dir}/{host_name}.{gaff}.mol2'
         host_atomnames = parse_mol2_atomnames(host_mol2_file)
     
         system.template_lines += [
@@ -109,7 +110,7 @@ def build(info, system_path, system_top, system_rst, system_pdb, dummy=False):
     if has_guest:
         guest_dir = Path(info['guest']['par_path']).resolve()
         guest_name = info['guest']['name']
-        guest_mol2_file = f'{guest_dir}/{guest_name}.gaff2.mol2'
+        guest_mol2_file = f'{guest_dir}/{guest_name}.{gaff}.mol2'
         guest_atomnames = parse_mol2_atomnames(guest_mol2_file)
 
         if info['guest']['par_path'] != 'None':
@@ -127,16 +128,16 @@ def build(info, system_path, system_top, system_rst, system_pdb, dummy=False):
             ]
 
     if has_complex:
-        complex_file = Path(info['complex']['file']).resolve()
-        ext = complex_file.suffix[1:]
+        #complex_file = Path(info['complex']['file']).resolve()
+        #ext = complex_file.suffix[1:]
 
-        # copy complex file
-        shutil.copy(complex_file, system_path/complex_file.name)
-        complex_file = (system_path/complex_file.name).resolve()
-        #rename_complex_pdb(complex_file, host_atomnames, guest_atomnames)
+        ## copy complex file
+        #shutil.copy(complex_file, system_path/complex_file.name)
+        #complex_file = (system_path/complex_file.name).resolve()
+        ##rename_complex_pdb(complex_file, host_atomnames, guest_atomnames)
 
         system.template_lines += [
-            f"model = load{ext} {complex_file}",
+            f"model = loadpdb {str(complex_pdb.resolve()).strip()}",
         ]
 
     else:
@@ -216,6 +217,42 @@ def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, num_wate
     system.build(clean_files=False)
     system.repartition_hydrogen_mass()
 
+def match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2'):
+    host_m = Chem.MolFromMolFile(str(host), removeHs=False)
+    guest_m = Chem.MolFromMolFile(str(guest), removeHs=False)
+    complex_m = Chem.MolFromPDBFile(str(complex), removeHs=False)
+    complex_host, complex_guest = Chem.GetMolFrags(complex_m, asMols=True)
+
+    ref = host_m
+    target = complex_host
+    gaff_mol2 = host.parent/gaff/f'{host.stem}.{gaff}.mol2'
+
+    mcs = FindMCS([ref, target])
+    ref_aids = ref.GetSubstructMatch(mcs.queryMol)
+    target_aids = target.GetSubstructMatch(mcs.queryMol)
+    atomnames = parse_mol2_atomnames(gaff_mol2)
+    for aid1, aid2 in zip(ref_aids, target_aids):
+        a1 = ref.GetAtomWithIdx(aid1)
+        a2 = target.GetAtomWithIdx(aid2)
+        atomname = atomnames[aid1]
+        a2.GetPDBResidueInfo().SetName('{:>4}'.format('{:<3}'.format(atomname)))
+
+    ref = guest_m
+    target = complex_guest
+    gaff_mol2 = guest.parent/gaff/f'{guest.stem}.{gaff}.mol2'
+
+    mcs = FindMCS([ref, target])
+    ref_aids = ref.GetSubstructMatch(mcs.queryMol)
+    target_aids = target.GetSubstructMatch(mcs.queryMol)
+    atomnames = parse_mol2_atomnames(gaff_mol2)
+    for aid1, aid2 in zip(ref_aids, target_aids):
+        a1 = ref.GetAtomWithIdx(aid1)
+        a2 = target.GetAtomWithIdx(aid2)
+        atomname = atomnames[aid1]
+        a2.GetPDBResidueInfo().SetName('{:>4}'.format('{:<3}'.format(atomname)))
+
+    complex = Chem.CombineMols(complex_host, complex_guest)
+    Chem.MolToPDBFile(complex, str(matched_complex_pdb))
 
 def init(args):
     import numpy as np
@@ -262,7 +299,7 @@ def init(args):
         guest = Path(args.guest)
 
         guestname = guest.stem
-        if guestname.upper() == 'CHL':
+        if guestname.upper() == 'CHL' and 0:
             guest_par_path = None
             guest_top = None
         else:
@@ -297,7 +334,10 @@ def init(args):
     system_top = system_path/'vac.prmtop'
     system_pdb = system_path/'vac.pdb'
     if not system_top.exists():
-        build(info, system_path, system_top, system_rst, system_pdb)
+        system_path.mkdir(exist_ok=True)
+        matched_complex_pdb = system_path/'complex.pdb'
+        match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2')
+        build(info, matched_complex_pdb, system_path, system_top, system_rst, system_pdb, gaff='gaff2')
 
     info['system'] = {
         'top': str(system_top),

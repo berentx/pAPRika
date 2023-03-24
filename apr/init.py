@@ -10,7 +10,7 @@ import openmm.app as app
 import openmm as openmm
 import parmed as pmd
 from rdkit import Chem
-from rdkit.Chem.rdFMCS import FindMCS
+from rdkit.Chem.rdFMCS import FindMCS, MCSParameters
 import yaml
 try:
     from yaml import CLoader as Loader
@@ -91,8 +91,8 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
     system.template_lines += [
         f"loadamberparams {host_dir}/{host_name}.frcmod",
         f"MOL = loadmol2 {host_dir}/{host_name}.{gaff}.mol2",
-        f"saveamberparm MOL {host_dir}/{host_name}.prmtop {host_dir}/{host_name}.rst7",
-        f"savepdb MOL {host_dir}/{host_name}.pdb",
+        f"saveamberparm MOL receptor.prmtop receptor.rst7",
+        f"savepdb MOL receptor.pdb",
     ]
 
     if info['guest']['par_path'] != 'None':
@@ -101,8 +101,8 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
         system.template_lines += [
             f"loadamberparams {guest_dir}/{guest_name}.frcmod",
             f"LIG = loadmol2 {guest_dir}/{guest_name}.{gaff}.mol2",
-            f"saveamberparm LIG {guest_dir}/{guest_name}.prmtop {guest_dir}/{guest_name}.rst7",
-            f"savepdb LIG {guest_dir}/{guest_name}.pdb",
+            f"saveamberparm LIG ligand.prmtop ligand.rst7",
+            f"savepdb LIG ligand.pdb",
         ]
 
     if dummy:
@@ -218,7 +218,8 @@ def match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2'
     target = complex_host
     gaff_mol2 = host.parent/gaff/f'{host.stem}.{gaff}.mol2'
 
-    mcs = FindMCS([ref, target])
+    ps = MCSParameters()
+    mcs = FindMCS([ref, target], bondCompare=ps.BondTyper.CompareAny)
     ref_aids = ref.GetSubstructMatch(mcs.queryMol)
     target_aids = target.GetSubstructMatch(mcs.queryMol)
     atomnames = parse_mol2_atomnames(gaff_mol2)
@@ -232,7 +233,7 @@ def match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2'
     target = complex_guest
     gaff_mol2 = guest.parent/gaff/f'{guest.stem}.{gaff}.mol2'
 
-    mcs = FindMCS([ref, target])
+    mcs = FindMCS([ref, target], bondCompare=ps.BondTyper.CompareAny)
     ref_aids = ref.GetSubstructMatch(mcs.queryMol)
     target_aids = target.GetSubstructMatch(mcs.queryMol)
     atomnames = parse_mol2_atomnames(gaff_mol2)
