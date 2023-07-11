@@ -19,6 +19,7 @@ def main():
 
     # create the parser for the "init" command
     parser_init = subparsers.add_parser('init', help='init help')
+    parser_init.add_argument('--config', help='config file')
     parser_init.add_argument('--host', help='host mol2 file')
     parser_init.add_argument('--guest', help='guest mol2 file')
     parser_init.add_argument('--complex', help='complex PDB file')
