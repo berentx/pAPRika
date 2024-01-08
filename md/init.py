@@ -5,9 +5,25 @@ from pathlib import Path
 import shutil
 
 from rdkit import Chem
-from rdkit.Chem.rdFMCS import FindMCS
 from rdkit.Chem.rdFMCS import BondCompare
+from rdkit.Chem.rdFMCS import FindMCS, MCSParameters
+import yaml
+try:
+    from yaml import CLoader as Loader
+except ImportError:
+    from yaml import Loader
 
+
+logger = logging.getLogger("init")
+
+def parse_config(args):
+    config = yaml.load(open(args.config).read(), Loader=Loader)
+    if 'host' in config:
+        args.host = config['host']
+    if 'guest' in config:
+        args.guest = config['guest']
+    if 'complex' in config:
+        args.complex = config['complex']
 
 def parse_mol2_atomnames(mol2file):
     in_atomblock = False
@@ -228,7 +244,8 @@ def match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2'
     target = complex_host
     gaff_mol2 = host.parent/gaff/f'{host.stem}.{gaff}.mol2'
 
-    mcs = FindMCS([ref, target])
+    ps = MCSParameters()
+    mcs = FindMCS([ref, target], bondCompare=ps.BondTyper.CompareAny)
     ref_aids = ref.GetSubstructMatch(mcs.queryMol)
     target_aids = target.GetSubstructMatch(mcs.queryMol)
     if len(target_aids) < len(target.GetAtoms()):
@@ -248,7 +265,7 @@ def match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2'
     target = complex_guest
     gaff_mol2 = guest.parent/gaff/f'{guest.stem}.{gaff}.mol2'
 
-    mcs = FindMCS([ref, target])
+    mcs = FindMCS([ref, target], bondCompare=ps.BondTyper.CompareAny)
     ref_aids = ref.GetSubstructMatch(mcs.queryMol)
     target_aids = target.GetSubstructMatch(mcs.queryMol)
     atomnames = parse_mol2_atomnames(gaff_mol2)
@@ -279,14 +296,14 @@ def init(args):
     from paprika.restraints.openmm import apply_positional_restraints, apply_dat_restraint
     from restraints import setup_static_restraints
     
-    logger = logging.getLogger("init")
-
-
     info = {}
 
+    if args.config:
+        parse_config(args)
+
     if args.host:
-        logger.info('preparing host parameters')
         host = Path(args.host)
+        logger.info('preparing host parameters')
     
         hostname = host.stem
         host_par_path = host.parent/'gaff2'
@@ -342,8 +359,11 @@ def init(args):
     system_pdb = system_path/'vac.pdb'
     if not system_top.exists():
         system_path.mkdir(exist_ok=True)
-        matched_complex_pdb = system_path/'complex.pdb'
-        match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2')
+        if args.complex:
+            matched_complex_pdb = system_path/'complex.pdb'
+            match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2')
+        else:
+            matched_complex_pdb = guest_par_path/'sqm.pdb'
         build(info, matched_complex_pdb, system_path, system_top, system_rst, system_pdb, gaff='gaff2')
 
     info['system'] = {
