@@ -1,5 +1,6 @@
 name: paprika-dev
 channels:
+  - omnia
   - conda-forge
 dependencies:
   

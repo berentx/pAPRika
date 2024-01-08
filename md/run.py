@@ -11,6 +11,7 @@ def run(args):
     from paprika.restraints.restraints import create_window_list
     
     logger = logging.getLogger("run")
+    temperature = 300
 
 
     window_list = [d for d in Path('windows').glob("*") if d.is_dir()]
@@ -34,11 +35,23 @@ def run(args):
         coords = app.PDBFile(os.path.join(folder, 'system.pdb'))
 
         if not args.implicit:
-            system.addForce(openmm.AndersenThermostat(300*unit.kelvin, 1/unit.picosecond))
-            system.addForce(openmm.MonteCarloBarostat(1*unit.bar, 300*unit.kelvin))
+            system.addForce(openmm.AndersenThermostat(temperature*unit.kelvin, 1/unit.picosecond))
+            system.addForce(openmm.MonteCarloBarostat(1*unit.bar, temperature*unit.kelvin))
+
+        # setup restraints
+        restraint = openmm.CustomExternalForce('k*periodicdistance(x, y, z, x0, y0, z0)^2')
+        system.addForce(restraint)
+        restraint.addGlobalParameter('k', 100.0*unit.kilojoules_per_mole/(unit.nanometer**2))
+        restraint.addPerParticleParameter('x0')
+        restraint.addPerParticleParameter('y0')
+        restraint.addPerParticleParameter('z0')
+
+        for atom in coords.topology.atoms():
+            if atom.residue.name in ['MOL', 'LIG'] and atom.element.symbol != 'H':
+                restraint.addParticle(atom.index, coords.positions[atom.index])
 
         # Integrator
-        integrator = openmm.LangevinMiddleIntegrator(300 * unit.kelvin, 1.0 / unit.picoseconds, 2.0 * unit.femtoseconds)
+        integrator = openmm.LangevinMiddleIntegrator(temperature*unit.kelvin, 1.0 / unit.picoseconds, 2.0 * unit.femtoseconds)
     
         # Simulation Object
         simulation = app.Simulation(coords.topology, system, integrator)
@@ -68,9 +81,10 @@ def run(args):
         )
     
         # Simulation Object
-        simulation.context.setVelocitiesToTemperature(300)
+        simulation.context.setVelocitiesToTemperature(temperature)
         simulation.reporters.append(state_reporter)
-    
+
+
         # MD steps
         simulation.step(int(0.1 / 0.002 * 1000 + 0.5)) # 100ps
     
@@ -106,15 +120,15 @@ def run(args):
         coords = app.PDBFile(os.path.join(folder, 'minimized.pdb'))
 
         if not args.implicit:
-            system.addForce(openmm.AndersenThermostat(300*unit.kelvin, 1/unit.picosecond))
-            system.addForce(openmm.MonteCarloBarostat(1*unit.bar, 300*unit.kelvin))
+            system.addForce(openmm.AndersenThermostat(temperature*unit.kelvin, 1/unit.picosecond))
+            system.addForce(openmm.MonteCarloBarostat(1*unit.bar, temperature*unit.kelvin))
             timestep = 4.0 * unit.femtoseconds
 
         else:
             timestep = 2.0 * unit.femtoseconds
 
         # Integrator
-        integrator = openmm.LangevinIntegrator(300 * unit.kelvin, 1.0 / unit.picoseconds, timestep)
+        integrator = openmm.LangevinIntegrator(temperature*unit.kelvin, 1.0 / unit.picoseconds, timestep)
 
         # Reporters
         dcd_reporter = app.DCDReporter(os.path.join(folder, f'{prefix}.dcd'), 5000)

@@ -6,6 +6,7 @@ import shutil
 
 from rdkit import Chem
 from rdkit.Chem.rdFMCS import FindMCS
+from rdkit.Chem.rdFMCS import BondCompare
 
 
 def parse_mol2_atomnames(mol2file):
@@ -230,6 +231,12 @@ def match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2'
     mcs = FindMCS([ref, target])
     ref_aids = ref.GetSubstructMatch(mcs.queryMol)
     target_aids = target.GetSubstructMatch(mcs.queryMol)
+    if len(target_aids) < len(target.GetAtoms()):
+        print("some atom names are not matched; expand MCS for matching any bond order")
+        mcs = FindMCS([ref, target], bondCompare=BondCompare.CompareAny)
+        ref_aids = ref.GetSubstructMatch(mcs.queryMol)
+        target_aids = target.GetSubstructMatch(mcs.queryMol)
+        
     atomnames = parse_mol2_atomnames(gaff_mol2)
     for aid1, aid2 in zip(ref_aids, target_aids):
         a1 = ref.GetAtomWithIdx(aid1)
