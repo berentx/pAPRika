@@ -1,9 +1,11 @@
+import copy
 import json
 import logging
 import os
 from pathlib import Path
 import shutil
 
+import numpy as np
 from rdkit import Chem
 from rdkit.Chem.rdFMCS import BondCompare
 from rdkit.Chem.rdFMCS import FindMCS, MCSParameters
@@ -89,6 +91,50 @@ def antechamber(input, format, output_path, pl=-1, overwrite=False):
         assert Path(output_frcmod).exists()
 
     os.chdir(cwd)
+
+
+def duplicate_structures(original, n_copies):
+    copies = [original]
+    coor_max = np.max(original.coordinates, axis=0)
+    coor_min = np.min(original.coordinates, axis=0)
+    radius = np.linalg.norm(( coor_max - coor_min ) / 2)
+    dist_min = radius * 1.5
+    dist_max = radius * 3.0
+    centers = [np.mean(original, axis=0)]
+    n_trial = 0
+    max_trial = 100
+    while len(centers) < n_copies:
+        copy = copy.deepcopy(original)
+        center = np.random.choice(centers)
+        is_new_point_found = False
+        for j in range(20):
+            dd = np.random.rand(3)
+            dr = (dd[2] + 2) * radius
+            dtheta = dd[0] * np.pi
+            dphi = dd[1] * 2 * np.pi
+            dx = dr * np.sin(dtheta) * np.cos(dphi)
+            dy = dr * np.sin(dtheta) * np.sin(dphi)
+            dz = dr * np.cos(dtheta)
+            dt = np.array((dx, dy, dz))
+            new_center = center + dt
+            dist = np.linalg.norm(centers - new_center)
+            is_new_point_found = any((dist > dist_min) & (dist < dist_max))
+            if is_new_point_found:
+                break
+        
+        if is_new_point_found:
+            copy.coordinates += dt    
+            copies.append(copy)
+            centers.append(new_center)
+            print(centers)
+            n_trial = 0
+        
+        else:
+            n_trial += 1
+        
+        assert n_trial < max_trial
+    
+    return copies
 
 
 def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, dummy=False, gaff='gaff2'):
@@ -279,22 +325,11 @@ def match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2'
     Chem.MolToPDBFile(complex, str(matched_complex_pdb))
 
 def init(args):
-    import numpy as np
     import openmm.unit as unit
     import openmm.app as app
     import openmm as openmm
     import parmed as pmd
-    from rdkit import Chem
-    
     from paprika.build import align
-    from paprika.build import dummy
-    from paprika import restraints
-    from paprika.io import save_restraints
-    from paprika.restraints.restraints import create_window_list
-    from paprika.restraints.amber import amber_restraint_line
-    from paprika.restraints.utils import parse_window
-    from paprika.restraints.openmm import apply_positional_restraints, apply_dat_restraint
-    from restraints import setup_static_restraints
     
     info = {}
 
@@ -375,17 +410,25 @@ def init(args):
     structure = pmd.load_file('complex/vac.prmtop', 'complex/vac.rst7', structure=True)
 
     aligned_structure = align.align_principal_axes(structure)
-    aligned_structure.save(str(system_path/"aligned.prmtop"), overwrite=True)
-    aligned_structure.save(str(system_path/"aligned.rst7"), overwrite=True)
-    aligned_structure.save(str(system_path/"aligned.pdb"), overwrite=True)
+    aligned_prmtop = system_path/"aligned.prmtop"
+    aligned_rst7 = system_path/"aligned.rst7"
+    aligned_pdb = system_path/"aligned.pdb"
+
+    aligned_structure.save(str(aligned_prmtop), overwrite=True)
+    aligned_structure.save(str(aligned_rst7), overwrite=True)
+    aligned_structure.save(str(aligned_pdb), overwrite=True)
     
     sysnr = 1
     sysdir = Path(f"windows/{sysnr}")
     sysdir.mkdir(exist_ok=True, parents=True)
 
     folder = sysdir
-    shutil.copy("complex/aligned.prmtop", folder/"system.prmtop")
-    shutil.copy("complex/aligned.rst7", folder/"system.rst7")
+    if args.copy == 1:    
+        shutil.copy(aligned_prmtop, folder/"system.prmtop")
+        shutil.copy(aligned_rst7, folder/"system.rst7")
+    else:
+        original = pmd.load_file(str(aligned_prmtop), str(aligned_rst7))
+        copies = duplicate_structures(original, args.copy)
 
     prefix = 'system'
 
