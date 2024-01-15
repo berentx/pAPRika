@@ -432,6 +432,7 @@ def init(args):
     else:
         original = pmd.load_file(str(aligned_prmtop), str(aligned_rst7))
         copies = duplicate_structures(original, args.copy)
+
         for cp in copies:
             original += cp
         original.save(str(folder/"system.prmtop"), overwrite=True)
