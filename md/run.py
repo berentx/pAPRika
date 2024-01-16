@@ -58,7 +58,7 @@ def run(args):
         simulation.context.setPositions(coords.positions)
 
         # Minimize Energy
-        simulation.minimizeEnergy(tolerance=1.0*unit.kilojoules_per_mole, maxIterations=10000)
+        simulation.minimizeEnergy(tolerance=1.0*unit.kilojoules_per_mole/unit.nanometer, maxIterations=10000)
 
         # Save final coordinates
         positions = simulation.context.getState(getPositions=True).getPositions()
