@@ -93,25 +93,26 @@ def antechamber(input, format, output_path, pl=-1, overwrite=False):
     os.chdir(cwd)
 
 
-def duplicate_structures(original, n_copies):
-    copies = []
+def duplicate_structures(original, copies):
+    n_copies = len(copies.residues) / len(original.residues)
+    n_atoms = len(original.atoms)
     coor_max = np.max(original.coordinates, axis=0)
     coor_min = np.min(original.coordinates, axis=0)
     radius = np.linalg.norm(( coor_max - coor_min ) / 2)
-    dist_min = radius * 1.0
+    dist_min = radius * 1.2
     dist_max = radius * 2.5
     centers = np.array([np.mean(original.coordinates, axis=0)])
     n_trial = 0
-    max_trial = 100
+    max_trial = 200
+    coordinates = np.array(copies.coordinates)
     while len(centers) < n_copies:
-        cp = copy.deepcopy(original)
         center_index = np.random.choice(len(centers), 1)[0]
         center = centers[center_index]
 
         is_new_point_found = False
-        for j in range(20):
+        for j in range(50):
             dd = np.random.rand(3)
-            dr = (dd[2] + 2) * radius
+            dr = (dd[2] + 1.0) * radius
             dtheta = dd[0] * np.pi
             dphi = dd[1] * 2 * np.pi
             dx = dr * np.sin(dtheta) * np.cos(dphi)
@@ -125,18 +126,18 @@ def duplicate_structures(original, n_copies):
                 break
         
         if is_new_point_found:
-            cp.coordinates += dt    
-            copies.append(cp)
+            atom_index = len(centers) * n_atoms
+            coordinates[atom_index:atom_index+n_atoms] += dt
             centers = np.array(list(centers) + [new_center])
             n_trial = 0
         
         else:
             n_trial += 1
         
-        assert n_trial < max_trial
-    
-    return copies
+        assert n_trial < max_trial, centers
 
+    copies.coordinates = coordinates
+    
 
 def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, dummy=False, gaff='gaff2'):
     from paprika.build.system import TLeap
@@ -431,13 +432,12 @@ def init(args):
         shutil.copy(aligned_rst7, folder/"system.rst7")
     else:
         original = pmd.load_file(str(aligned_prmtop), str(aligned_rst7))
-        copies = duplicate_structures(original, args.copy)
+        copies = original * args.copy
+        duplicate_structures(original, copies)
 
-        for cp in copies:
-            original += cp
-        original.save(str(folder/"system.prmtop"), overwrite=True)
-        original.save(str(folder/"system.rst7"), overwrite=True)
-        original.save(str(folder/"system.pdb"), overwrite=True)
+        copies.save(str(folder/"system.prmtop"), overwrite=True)
+        copies.save(str(folder/"system.rst7"), overwrite=True)
+        copies.save(str(folder/"system.pdb"), overwrite=True)
 
     prefix = 'system'
 
