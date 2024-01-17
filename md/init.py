@@ -99,8 +99,8 @@ def duplicate_structures(original, copies):
     coor_max = np.max(original.coordinates, axis=0)
     coor_min = np.min(original.coordinates, axis=0)
     radius = np.linalg.norm(( coor_max - coor_min ) / 2)
-    dist_min = radius * 2.0
-    dist_max = radius * 3.5
+    dist_min = radius * 1.5
+    dist_max = radius * 3.0
     centers = np.array([np.mean(original.coordinates, axis=0)])
     n_trial = 0
     max_trial = 200
@@ -112,7 +112,7 @@ def duplicate_structures(original, copies):
         is_new_point_found = False
         for j in range(50):
             dd = np.random.rand(3)
-            dr = (dd[2] + 1.5) * radius
+            dr = (dd[2] + 2.0) * radius
             dtheta = dd[0] * np.pi
             dphi = dd[1] * 2 * np.pi
             dx = dr * np.sin(dtheta) * np.cos(dphi)
