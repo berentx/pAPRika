@@ -1,6 +1,5 @@
 name: paprika-dev
 channels:
-  - omnia
   - conda-forge
 dependencies:
   
@@ -13,6 +12,7 @@ dependencies:
   - mdtraj
   - pymbar >=4.0.1
   - openmm >=7.6.0
+  - cudatoolkit=11.8
   - yank
   - ambertools >=22.0
   - pyyaml
