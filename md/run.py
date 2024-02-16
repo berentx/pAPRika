@@ -11,7 +11,7 @@ def run(args):
     from paprika.restraints.restraints import create_window_list
     
     logger = logging.getLogger("run")
-    temperature = 300
+    temperature = args.temp
 
 
     window_list = [d for d in Path('windows').glob("*") if d.is_dir()]
@@ -86,7 +86,7 @@ def run(args):
 
 
         # MD steps
-        simulation.step(int(0.1 / 0.002 * 1000 + 0.5)) # 100ps
+        simulation.step(int(1.0 / 0.002 * 1000 + 0.5)) # 1ns
     
         # Save final coordinates
         state = simulation.context.getState(getPositions=True, getVelocities=True, enforcePeriodicBox=enforcePBC)
