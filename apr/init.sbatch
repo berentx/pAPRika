@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --partition c5a
+##SBATCH --partition c5a
 #SBATCH --nodes 1
 #SBATCH --ntasks 4
 

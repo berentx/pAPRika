@@ -189,6 +189,7 @@ def parse_config(args):
     args.host = config['host']
     args.guest = config['guest']
     args.complex = config['complex']
+    args.flip = config.get('flip', False)
     args.g1 = config['anchor']['g1']
     args.g2 = config['anchor']['g2']
 
@@ -255,6 +256,7 @@ def init(args):
     guest = Path(args.guest)
     complex = Path(args.complex)
     gaff = args.gaff
+    flip = args.flip
 
     logger.info('preparing host parameters')
 
@@ -344,6 +346,14 @@ def init(args):
     structure = pmd.load_file('complex/vac.prmtop', 'complex/vac.rst7', structure=True)
 
     aligned_structure = align.zalign(structure, G1, G2)
+
+    if flip:
+        coords = aligned_structure.coordinates
+        coords[len(aligned_structure.residues[0]):,2] *= -1
+        aligned_structure.coordinates = coords
+        G1, G2 = G2, G1
+        aligned_structure = align.zalign(aligned_structure, G1, G2)
+
     aligned_structure.save(str(system_path/"aligned.prmtop"), overwrite=True)
     aligned_structure.save(str(system_path/"aligned.rst7"), overwrite=True)
 

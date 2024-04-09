@@ -145,10 +145,16 @@ def run_production(folder, args, enforcePBC=True):
 
 
 def run(args):
-    host_guest_restraints = load_restraints(filepath="windows/restraints.json")
-    guest_restraints = load_restraints(filepath="windows/guest_restraints.json")
+    window_list = None
 
-    window_list = create_window_list(guest_restraints)
+    try:
+        host_guest_restraints = load_restraints(filepath="windows/restraints.json")
+        guest_restraints = load_restraints(filepath="windows/guest_restraints.json")
+
+        window_list = create_window_list(guest_restraints)
+
+    except:
+        pass
 
     enforcePBC = True
     if args.implicit:
@@ -178,7 +184,7 @@ def run(args):
             run_equilibration(folder, args, enforcePBC)
             run_production(folder, args, enforcePBC)
 
-    else:
+    elif window_list is not None:
         for window in window_list:
             folder = os.path.join('windows', window)
     
@@ -188,4 +194,8 @@ def run(args):
             run_equilibration(folder, args, enforcePBC)
             run_production(folder, args, enforcePBC)
     
-    
+    else:
+        folder = Path('.')
+        run_equilibration(folder, args, enforcePBC)
+        run_production(folder, args, enforcePBC)
+

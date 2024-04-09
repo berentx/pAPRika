@@ -15,4 +15,4 @@ equil=$(sbatch --parsable --dependency=afterok:${init} "${path}/equil.sbatch")
 #
 #echo "submit analysis job"
 #analysis=$(sbatch --parsable --dependency=afterok:${run} "${path}/analysis.sbatch")
-#
+
