@@ -176,11 +176,13 @@ def run(args):
             if pdb.exists():
                 continue
 
-            prev = window_list[i-1]
-            prev_folder = Path(os.path.join('windows', prev))
-            for p in folder.glob("equilibration.*"):
-                p.unlink()
-            shutil.copy(prev_folder/'production.pdb', folder/'system.pdb')
+            if i > 0:
+                prev = window_list[i-1]
+                prev_folder = Path(os.path.join('windows', prev))
+                for p in folder.glob("equilibration.*"):
+                    p.unlink()
+                shutil.copy(prev_folder/'production.pdb', folder/'system.pdb')
+
             run_equilibration(folder, args, enforcePBC)
             run_production(folder, args, enforcePBC)
 

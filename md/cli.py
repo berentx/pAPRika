@@ -23,6 +23,7 @@ def main():
     parser_init.add_argument('--host', help='host mol2 file')
     parser_init.add_argument('--guest', help='guest mol2 file')
     parser_init.add_argument('--complex', help='complex PDB file')
+    parser_init.add_argument('--nrep', type=int, default=1, help='number of replicas')
     parser_init.add_argument('--copy', type=int, default=1, help='copy solutes')
     parser_init.add_argument('--implicit', action='store_true', help='use implicit solvent (default: explicit solvent)')
     parser_init.add_argument('--overwrite', action='store_true', help='force overwrite')

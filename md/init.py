@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import shutil
 
 import numpy as np
@@ -26,6 +27,12 @@ def parse_config(args):
         args.guest = config['guest']
     if 'complex' in config:
         args.complex = config['complex']
+    if 'nrep' in config:
+        args.nrep = config['nrep']
+    if 'copy' in config:
+        args.copy = config['copy']
+    if 'nwater' in config:
+        args.nwater = config['nwater']
 
 def parse_mol2_atomnames(mol2file):
     in_atomblock = False
@@ -172,7 +179,7 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
         system.template_lines += [
             f"loadamberparams {host_dir}/{host_name}.frcmod",
             f"MOL = loadmol2 {host_mol2_file}",
-            f"saveamberparm MOL receptor.prmtop receptor.rst7",
+            #f"saveamberparm MOL receptor.prmtop receptor.rst7",
         ]
 
     if has_guest:
@@ -185,14 +192,14 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
             system.template_lines += [
                 f"loadamberparams {guest_dir}/{guest_name}.frcmod",
                 f"LIG = loadmol2 {guest_mol2_file}",
-                f"saveamberparm LIG ligand.prmtop ligand.rst7",
+                #f"saveamberparm LIG ligand.prmtop ligand.rst7",
             ]
         else:
             guest_file = Path(info['guest']['file']).resolve()
             ext = guest_file.suffix[1:]
             system.template_lines += [
                 f"LIG = load{ext} {guest_file}",
-                f"saveamberparm LIG ligand.prmtop ligand.rst7",
+                #f"saveamberparm LIG ligand.prmtop ligand.rst7",
             ]
 
     if has_complex:
@@ -221,6 +228,11 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
         f"savepdb model {system_pdb.name}",
         f"saveamberparm model {system_top.name} {system_rst.name}"
     ]
+
+    if has_host:
+        system.template_lines += [ f"saveamberparm MOL receptor.prmtop receptor.rst7", ]
+    if has_guest:
+        system.template_lines += [ f"saveamberparm LIG ligand.prmtop ligand.rst7", ]
 
     system.build(clean_files=False)
     assert Path(system_top).exists()
@@ -285,49 +297,79 @@ def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, num_wate
     system.build(clean_files=False)
     system.repartition_hydrogen_mass()
 
+def get_mol2block(mol2file):
+    _in = False
+    block = ""
+    for line in open(mol2file):
+        if _in and line.startswith('@'):
+            _in = False
+        if _in:
+            atomname = line.split()[1]
+            element = re.sub(r'\d+', '', atomname)
+            line = line[:50] + f'{element:11s}' + line[61:]
+        if line.startswith("@<TRIPOS>ATOM"):
+            _in = True
+        block += line
+    return block
+
+
 def match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2'):
-    host_m = Chem.MolFromMolFile(str(host), removeHs=False)
-    guest_m = Chem.MolFromMolFile(str(guest), removeHs=False)
+    host_gaff_mol2 = host.parent/gaff/f'{host.stem}.{gaff}.mol2'
+    guest_gaff_mol2 = guest.parent/gaff/f'{guest.stem}.{gaff}.mol2'
+    host_m = Chem.MolFromMol2Block(get_mol2block(host_gaff_mol2), removeHs=False)
+    guest_m = Chem.MolFromMol2Block(get_mol2block(guest_gaff_mol2), removeHs=False)
     complex_m = Chem.MolFromPDBFile(str(complex), removeHs=False)
-    complex_host, complex_guest = Chem.GetMolFrags(complex_m, asMols=True)
+    #complex_host, complex_guest = Chem.GetMolFrags(complex_m, asMols=True)
+    mols = Chem.GetMolFrags(complex_m, asMols=True)
 
-    ref = host_m
-    target = complex_host
-    gaff_mol2 = host.parent/gaff/f'{host.stem}.{gaff}.mol2'
+    for mol in mols:
+        ps = MCSParameters()
+        host_mcs = FindMCS([host_m, mol], ps)
+        guest_mcs = FindMCS([guest_m, mol], ps)
 
-    ps = MCSParameters()
-    mcs = FindMCS([ref, target], bondCompare=ps.BondTyper.CompareAny)
-    ref_aids = ref.GetSubstructMatch(mcs.queryMol)
-    target_aids = target.GetSubstructMatch(mcs.queryMol)
-    if len(target_aids) < len(target.GetAtoms()):
-        print("some atom names are not matched; expand MCS for matching any bond order")
-        mcs = FindMCS([ref, target], bondCompare=BondCompare.CompareAny)
-        ref_aids = ref.GetSubstructMatch(mcs.queryMol)
-        target_aids = target.GetSubstructMatch(mcs.queryMol)
+        host_aids = host_m.GetSubstructMatch(host_mcs.queryMol)
+        guest_aids = guest_m.GetSubstructMatch(guest_mcs.queryMol)
+
+        is_host = is_guest = False
+        if len(host_aids) > len(guest_aids):
+            is_host = True
+            target_aids = mol.GetSubstructMatch(host_mcs.queryMol)
+        else:
+            is_guest = True
+            target_aids = mol.GetSubstructMatch(guest_mcs.queryMol)
+
+        if is_host:
+            if len(target_aids) < len(mol.GetAtoms()):
+                print("some atom names are not matched; expand MCS for matching any bond order")
+                mcs = FindMCS([host_m, mol], bondCompare=BondCompare.CompareAny)
+                _aids = host_m.GetSubstructMatch(mcs.queryMol)
+                target_aids = mol.GetSubstructMatch(mcs.queryMol)
         
-    atomnames = parse_mol2_atomnames(gaff_mol2)
-    for aid1, aid2 in zip(ref_aids, target_aids):
-        a1 = ref.GetAtomWithIdx(aid1)
-        a2 = target.GetAtomWithIdx(aid2)
-        atomname = atomnames[aid1]
-        a2.GetPDBResidueInfo().SetName('{:>4}'.format('{:<3}'.format(atomname)))
+            atomnames = parse_mol2_atomnames(host_gaff_mol2)
+            for aid1, aid2 in zip(host_aids, target_aids):
+                a1 = host_m.GetAtomWithIdx(aid1)
+                a2 = mol.GetAtomWithIdx(aid2)
+                atomname = atomnames[aid1]
+                a2.GetPDBResidueInfo().SetName('{:>4}'.format('{:<3}'.format(atomname)))
 
-    ref = guest_m
-    target = complex_guest
-    gaff_mol2 = guest.parent/gaff/f'{guest.stem}.{gaff}.mol2'
+        if is_guest:
+            if len(target_aids) < len(mol.GetAtoms()):
+                print("some atom names are not matched; expand MCS for matching any bond order")
+                mcs = FindMCS([guest_m, mol], bondCompare=BondCompare.CompareAny)
+                guest_aids = guest_m.GetSubstructMatch(mcs.queryMol)
+                target_aids = mol.GetSubstructMatch(mcs.queryMol)
+        
+            atomnames = parse_mol2_atomnames(guest_gaff_mol2)
+            for aid1, aid2 in zip(guest_aids, target_aids):
+                a1 = guest_m.GetAtomWithIdx(aid1)
+                a2 = mol.GetAtomWithIdx(aid2)
+                atomname = atomnames[aid1]
+                a2.GetPDBResidueInfo().SetName('{:>4}'.format('{:<3}'.format(atomname)))
 
-    mcs = FindMCS([ref, target], bondCompare=ps.BondTyper.CompareAny)
-    ref_aids = ref.GetSubstructMatch(mcs.queryMol)
-    target_aids = target.GetSubstructMatch(mcs.queryMol)
-    atomnames = parse_mol2_atomnames(gaff_mol2)
-    for aid1, aid2 in zip(ref_aids, target_aids):
-        a1 = ref.GetAtomWithIdx(aid1)
-        a2 = target.GetAtomWithIdx(aid2)
-        atomname = atomnames[aid1]
-        a2.GetPDBResidueInfo().SetName('{:>4}'.format('{:<3}'.format(atomname)))
-
-    complex = Chem.CombineMols(complex_host, complex_guest)
-    Chem.MolToPDBFile(complex, str(matched_complex_pdb))
+    complex = Chem.CombineMols(mols[0], mols[1])
+    for mol in mols[2:]:
+        complex = Chem.CombineMols(complex, mol)
+    Chem.MolToPDBFile(complex, str(matched_complex_pdb), flavor=4)
 
 def init(args):
     import openmm.unit as unit
@@ -425,64 +467,70 @@ def init(args):
     aligned_structure.save(str(aligned_rst7), overwrite=True)
     aligned_structure.save(str(aligned_pdb), overwrite=True)
     
-    sysnr = 1
-    sysdir = Path(f"windows/{sysnr}")
-    sysdir.mkdir(exist_ok=True, parents=True)
+    for sysnr in range(1, 1+args.nrep):
+        sysdir = Path(f"windows/{sysnr}")
+        sysdir.mkdir(exist_ok=True, parents=True)
+    
+        folder = sysdir
+        prefix = 'system'
 
-    folder = sysdir
-    if args.copy == 1:    
-        shutil.copy(aligned_prmtop, folder/"system.prmtop")
-        shutil.copy(aligned_rst7, folder/"system.rst7")
-    else:
-        original = pmd.load_file(str(aligned_prmtop), str(aligned_rst7))
-        copies = original * args.copy
-        duplicate_structures(original, copies)
+        # solvate window
+        if not args.implicit:
+            prefix = 'system-solvated'
+ 
+        if (folder/f'{prefix}.pdb').exists():
+            continue
 
-        copies.save(str(folder/"system.prmtop"), overwrite=True)
-        copies.save(str(folder/"system.rst7"), overwrite=True)
-        copies.save(str(folder/"system.pdb"), overwrite=True)
-
-    prefix = 'system'
-
-    # solvate window
-    if not args.implicit:
-        print(f"Solvating system in window {sysnr}.")
-        prefix = 'system-solvated'
-        structure = pmd.load_file(str(folder/"system.prmtop"), str(folder/"system.rst7"))
-        structure.save(str(folder/"system.pdb"), overwrite=True)
-        solvate(info, str(folder/"system.pdb"), 'complex', folder, prefix,
-                num_waters=args.nwater, ion_conc=(args.conc/1000.0), dummy=False)
-
-    # Load Amber
-    prmtop = app.AmberPrmtopFile(str(folder/f'{prefix}.prmtop'))
-    inpcrd = app.AmberInpcrdFile(str(folder/f'{prefix}.rst7'))
-
-    # Create PDB file
-    with open(folder/'system.pdb', 'w') as file:
-        app.PDBFile.writeFile(prmtop.topology, inpcrd.positions, file, keepIds=True)
-
-    # Create an OpenMM system from the Amber topology
-    if not args.implicit:
-        for line in open(folder/'system.pdb'):
-            if line.startswith("CRYST1"):
-                boxx, boxy, boxz = list(map(float, line.split()[1:4]))
-                break
-
-        system = prmtop.createSystem(
-            nonbondedMethod=app.PME,
-            nonbondedCutoff=9.0*unit.angstroms,
-            constraints=app.HBonds,
-        )
-
-    else:
-        system = prmtop.createSystem(
-            nonbondedMethod=app.NoCutoff,
-            constraints=app.HBonds,
-            implicitSolvent=app.HCT,
-        )
-
-    # Save OpenMM system to XML file
-    system_xml = openmm.XmlSerializer.serialize(system)
-    with open(folder/'system.xml', 'w') as file:
-        file.write(system_xml)
-
+        if args.copy == 1:    
+            shutil.copy(aligned_prmtop, folder/"system.prmtop")
+            shutil.copy(aligned_rst7, folder/"system.rst7")
+        else:
+            original = pmd.load_file(str(aligned_prmtop), str(aligned_rst7))
+            copies = original * args.copy
+            duplicate_structures(original, copies)
+    
+            copies.save(str(folder/"system.prmtop"), overwrite=True)
+            copies.save(str(folder/"system.rst7"), overwrite=True)
+            copies.save(str(folder/"system.pdb"), overwrite=True)
+    
+        # solvate window
+        if not args.implicit:
+            print(f"Solvating system in window {sysnr}.")
+            structure = pmd.load_file(str(folder/"system.prmtop"), str(folder/"system.rst7"))
+            structure.save(str(folder/"system.pdb"), overwrite=True)
+            solvate(info, str(folder/"system.pdb"), 'complex', folder, prefix,
+                    num_waters=args.nwater, ion_conc=(args.conc/1000.0), dummy=False)
+    
+        # Load Amber
+        prmtop = app.AmberPrmtopFile(str(folder/f'{prefix}.prmtop'))
+        inpcrd = app.AmberInpcrdFile(str(folder/f'{prefix}.rst7'))
+    
+        # Create PDB file
+        with open(folder/'system.pdb', 'w') as file:
+            app.PDBFile.writeFile(prmtop.topology, inpcrd.positions, file, keepIds=True)
+    
+        # Create an OpenMM system from the Amber topology
+        if not args.implicit:
+            for line in open(folder/'system.pdb'):
+                if line.startswith("CRYST1"):
+                    boxx, boxy, boxz = list(map(float, line.split()[1:4]))
+                    break
+    
+            system = prmtop.createSystem(
+                nonbondedMethod=app.PME,
+                nonbondedCutoff=9.0*unit.angstroms,
+                constraints=app.HBonds,
+            )
+    
+        else:
+            system = prmtop.createSystem(
+                nonbondedMethod=app.NoCutoff,
+                constraints=app.HBonds,
+                implicitSolvent=app.HCT,
+            )
+    
+        # Save OpenMM system to XML file
+        system_xml = openmm.XmlSerializer.serialize(system)
+        with open(folder/'system.xml', 'w') as file:
+            file.write(system_xml)
+    

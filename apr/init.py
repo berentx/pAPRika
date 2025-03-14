@@ -3,6 +3,7 @@ import logging
 import os
 from pathlib import Path
 import shutil
+import re
 
 import numpy as np
 import openmm.unit as unit
@@ -10,7 +11,7 @@ import openmm.app as app
 import openmm as openmm
 import parmed as pmd
 from rdkit import Chem
-from rdkit.Chem.rdFMCS import FindMCS, MCSParameters
+from rdkit.Chem.rdFMCS import FindMCS, MCSParameters, BondCompare
 import yaml
 try:
     from yaml import CLoader as Loader
@@ -91,8 +92,6 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
     system.template_lines += [
         f"loadamberparams {host_dir}/{host_name}.frcmod",
         f"MOL = loadmol2 {host_dir}/{host_name}.{gaff}.mol2",
-        f"saveamberparm MOL receptor.prmtop receptor.rst7",
-        f"savepdb MOL receptor.pdb",
     ]
 
     if info['guest']['par_path'] != 'None':
@@ -101,8 +100,6 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
         system.template_lines += [
             f"loadamberparams {guest_dir}/{guest_name}.frcmod",
             f"LIG = loadmol2 {guest_dir}/{guest_name}.{gaff}.mol2",
-            f"saveamberparm LIG ligand.prmtop ligand.rst7",
-            f"savepdb LIG ligand.pdb",
         ]
 
     if dummy:
@@ -117,7 +114,9 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
         f"model = loadpdb {str(complex_pdb.resolve()).strip()}",
         "check model",
         f"savepdb model {system_pdb.name}",
-        f"saveamberparm model {system_top.name} {system_rst.name}"
+        f"saveamberparm model {system_top.name} {system_rst.name}",
+        "saveamberparm MOL receptor.prmtop receptor.rst7",
+        "saveamberparm LIG ligand.prmtop ligand.rst7",
     ]
 
     system.build(clean_files=False)
@@ -151,6 +150,7 @@ def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, num_wate
     system.template_lines = [
         f"source leaprc.{gaff}",
         "source leaprc.lipid21",
+        "set default PBRadii mbondi2",
         #"source leaprc.water.tip3p",
     ]
 
@@ -208,44 +208,79 @@ def parse_mol2_atomnames(mol2file):
             atomnames.append(atomname)
     return atomnames
 
+def get_mol2block(mol2file):
+    _in = False
+    block = ""
+    for line in open(mol2file):
+        if _in and line.startswith('@'):
+            _in = False
+        if _in:
+            atomname = line.split()[1]
+            element = re.sub(r'\d+', '', atomname)
+            line = line[:50] + f'{element:11s}' + line[61:]
+        if line.startswith("@<TRIPOS>ATOM"):
+            _in = True
+        block += line
+    return block
+
 
 def match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2'):
-    host_m = Chem.MolFromMolFile(str(host), removeHs=False)
-    guest_m = Chem.MolFromMolFile(str(guest), removeHs=False)
+    host_gaff_mol2 = host.parent/gaff/f'{host.stem}.{gaff}.mol2'
+    guest_gaff_mol2 = guest.parent/gaff/f'{guest.stem}.{gaff}.mol2'
+    host_m = Chem.MolFromMol2Block(get_mol2block(host_gaff_mol2), removeHs=False)
+    guest_m = Chem.MolFromMol2Block(get_mol2block(guest_gaff_mol2), removeHs=False)
     complex_m = Chem.MolFromPDBFile(str(complex), removeHs=False)
-    complex_host, complex_guest = Chem.GetMolFrags(complex_m, asMols=True)
+    #complex_host, complex_guest = Chem.GetMolFrags(complex_m, asMols=True)
+    mols = Chem.GetMolFrags(complex_m, asMols=True)
 
-    ref = host_m
-    target = complex_host
-    gaff_mol2 = host.parent/gaff/f'{host.stem}.{gaff}.mol2'
+    for mol in mols:
+        ps = MCSParameters()
+        host_mcs = FindMCS([host_m, mol], ps)
+        guest_mcs = FindMCS([guest_m, mol], ps)
 
-    ps = MCSParameters()
-    mcs = FindMCS([ref, target], bondCompare=ps.BondTyper.CompareAny)
-    ref_aids = ref.GetSubstructMatch(mcs.queryMol)
-    target_aids = target.GetSubstructMatch(mcs.queryMol)
-    atomnames = parse_mol2_atomnames(gaff_mol2)
-    for aid1, aid2 in zip(ref_aids, target_aids):
-        a1 = ref.GetAtomWithIdx(aid1)
-        a2 = target.GetAtomWithIdx(aid2)
-        atomname = atomnames[aid1]
-        a2.GetPDBResidueInfo().SetName('{:>4}'.format('{:<3}'.format(atomname)))
+        host_aids = host_m.GetSubstructMatch(host_mcs.queryMol)
+        guest_aids = guest_m.GetSubstructMatch(guest_mcs.queryMol)
 
-    ref = guest_m
-    target = complex_guest
-    gaff_mol2 = guest.parent/gaff/f'{guest.stem}.{gaff}.mol2'
+        is_host = is_guest = False
+        if len(host_aids) > len(guest_aids):
+            is_host = True
+            target_aids = mol.GetSubstructMatch(host_mcs.queryMol)
+        else:
+            is_guest = True
+            target_aids = mol.GetSubstructMatch(guest_mcs.queryMol)
 
-    mcs = FindMCS([ref, target], bondCompare=ps.BondTyper.CompareAny)
-    ref_aids = ref.GetSubstructMatch(mcs.queryMol)
-    target_aids = target.GetSubstructMatch(mcs.queryMol)
-    atomnames = parse_mol2_atomnames(gaff_mol2)
-    for aid1, aid2 in zip(ref_aids, target_aids):
-        a1 = ref.GetAtomWithIdx(aid1)
-        a2 = target.GetAtomWithIdx(aid2)
-        atomname = atomnames[aid1]
-        a2.GetPDBResidueInfo().SetName('{:>4}'.format('{:<3}'.format(atomname)))
+        if is_host:
+            if len(target_aids) < len(mol.GetAtoms()):
+                print("some atom names are not matched; expand MCS for matching any bond order")
+                mcs = FindMCS([host_m, mol], bondCompare=BondCompare.CompareAny)
+                _aids = host_m.GetSubstructMatch(mcs.queryMol)
+                target_aids = mol.GetSubstructMatch(mcs.queryMol)
+        
+            atomnames = parse_mol2_atomnames(host_gaff_mol2)
+            for aid1, aid2 in zip(host_aids, target_aids):
+                a1 = host_m.GetAtomWithIdx(aid1)
+                a2 = mol.GetAtomWithIdx(aid2)
+                atomname = atomnames[aid1]
+                a2.GetPDBResidueInfo().SetName('{:>4}'.format('{:<3}'.format(atomname)))
 
-    complex = Chem.CombineMols(complex_host, complex_guest)
-    Chem.MolToPDBFile(complex, str(matched_complex_pdb))
+        if is_guest:
+            if len(target_aids) < len(mol.GetAtoms()):
+                print("some atom names are not matched; expand MCS for matching any bond order")
+                mcs = FindMCS([guest_m, mol], bondCompare=BondCompare.CompareAny)
+                guest_aids = guest_m.GetSubstructMatch(mcs.queryMol)
+                target_aids = mol.GetSubstructMatch(mcs.queryMol)
+        
+            atomnames = parse_mol2_atomnames(guest_gaff_mol2)
+            for aid1, aid2 in zip(guest_aids, target_aids):
+                a1 = guest_m.GetAtomWithIdx(aid1)
+                a2 = mol.GetAtomWithIdx(aid2)
+                atomname = atomnames[aid1]
+                a2.GetPDBResidueInfo().SetName('{:>4}'.format('{:<3}'.format(atomname)))
+
+    complex = Chem.CombineMols(mols[0], mols[1])
+    for mol in mols[2:]:
+        complex = Chem.CombineMols(complex, mol)
+    Chem.MolToPDBFile(complex, str(matched_complex_pdb), flavor=4)
 
 
 def init(args):

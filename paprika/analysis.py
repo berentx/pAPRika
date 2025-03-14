@@ -1643,6 +1643,7 @@ def load_trajectory(window, trajectory, topology, single_topology=False):
         The trajectory of stored as a pytraj object.
     """
 
+    print("Load trajectories from {}/{}...".format(window, trajectory))
     logger.debug("Load trajectories from {}/{}...".format(window, trajectory))
     if isinstance(trajectory, str):
         trajectory_path = os.path.join(window, trajectory)
