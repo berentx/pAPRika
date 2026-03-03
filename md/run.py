@@ -109,10 +109,9 @@ def run(args):
             else:
                 n_steps = len(list(Path(f'{folder}').glob(f'production.*.pdb')))
                 prefix = f'production.{n_steps+1}'
+                rstfile = f'production.rst'
                 if n_steps > 0:
                     rstfile = f'production.{n_steps}.rst'
-                else:
-                    rstfile = f'production.rst'
 
         logger.info(f"Running production in window {window}...")
         print(f"Running production in window {window}...")
@@ -134,7 +133,7 @@ def run(args):
         integrator = openmm.LangevinIntegrator(temperature*unit.kelvin, 1.0 / unit.picoseconds, timestep)
 
         # Reporters
-        dcd_reporter = app.DCDReporter(os.path.join(folder, f'{prefix}.dcd'), 5000)
+        dcd_reporter = app.DCDReporter(os.path.join(folder, f'{prefix}.dcd'), args.dcd_freq)
         state_reporter = app.StateDataReporter(
             os.path.join(folder, f'{prefix}.log'),
             1000,

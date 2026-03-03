@@ -235,8 +235,10 @@ def match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2'
 
     for mol in mols:
         ps = MCSParameters()
-        host_mcs = FindMCS([host_m, mol], ps)
-        guest_mcs = FindMCS([guest_m, mol], ps)
+        print(f'match host: {host_gaff_mol2}')
+        host_mcs = FindMCS([host_m, mol], completeRingsOnly=True, bondCompare=BondCompare.CompareAny, timeout=1)
+        print('match guest')
+        guest_mcs = FindMCS([guest_m, mol], timeout=1)
 
         host_aids = host_m.GetSubstructMatch(host_mcs.queryMol)
         guest_aids = guest_m.GetSubstructMatch(guest_mcs.queryMol)
@@ -252,8 +254,8 @@ def match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2'
         if is_host:
             if len(target_aids) < len(mol.GetAtoms()):
                 print("some atom names are not matched; expand MCS for matching any bond order")
-                mcs = FindMCS([host_m, mol], bondCompare=BondCompare.CompareAny)
-                _aids = host_m.GetSubstructMatch(mcs.queryMol)
+                mcs = FindMCS([host_m, mol], bondCompare=BondCompare.CompareAny, timeout=1)
+                host_aids = host_m.GetSubstructMatch(mcs.queryMol)
                 target_aids = mol.GetSubstructMatch(mcs.queryMol)
         
             atomnames = parse_mol2_atomnames(host_gaff_mol2)
@@ -266,7 +268,7 @@ def match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2'
         if is_guest:
             if len(target_aids) < len(mol.GetAtoms()):
                 print("some atom names are not matched; expand MCS for matching any bond order")
-                mcs = FindMCS([guest_m, mol], bondCompare=BondCompare.CompareAny)
+                mcs = FindMCS([guest_m, mol], bondCompare=BondCompare.CompareAny, timeout=1)
                 guest_aids = guest_m.GetSubstructMatch(mcs.queryMol)
                 target_aids = mol.GetSubstructMatch(mcs.queryMol)
         
