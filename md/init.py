@@ -10,6 +10,8 @@ import numpy as np
 from rdkit import Chem
 from rdkit.Chem.rdFMCS import BondCompare
 from rdkit.Chem.rdFMCS import FindMCS, MCSParameters
+from rdkit.Chem.MolStandardize import rdMolStandardize
+import parmed
 import yaml
 try:
     from yaml import CLoader as Loader
@@ -33,6 +35,8 @@ def parse_config(args):
         args.copy = config['copy']
     if 'nwater' in config:
         args.nwater = config['nwater']
+    if 'temp' in config:
+        args.temp = config['temp']
 
 def parse_mol2_atomnames(mol2file):
     in_atomblock = False
@@ -181,12 +185,17 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
             f"MOL = loadmol2 {host_mol2_file}",
             #f"saveamberparm MOL receptor.prmtop receptor.rst7",
         ]
+        if 'host_pdb' in info['host']:
+            host_pdb = Path(info['host']['host_pdb'])
+            system.template_lines += [
+                f"HOST = loadpdb {str(host_pdb.resolve()).strip()}",
+            ]
 
     if has_guest:
         guest_dir = Path(info['guest']['par_path']).resolve()
         guest_name = info['guest']['name']
         guest_mol2_file = f'{guest_dir}/{guest_name}.{gaff}.mol2'
-        guest_atomnames = parse_mol2_atomnames(guest_mol2_file)
+        #guest_atomnames = parse_mol2_atomnames(guest_mol2_file)
 
         if info['guest']['par_path'] != 'None':
             system.template_lines += [
@@ -194,13 +203,13 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
                 f"LIG = loadmol2 {guest_mol2_file}",
                 #f"saveamberparm LIG ligand.prmtop ligand.rst7",
             ]
-        else:
-            guest_file = Path(info['guest']['file']).resolve()
-            ext = guest_file.suffix[1:]
-            system.template_lines += [
-                f"LIG = load{ext} {guest_file}",
-                #f"saveamberparm LIG ligand.prmtop ligand.rst7",
-            ]
+        #else:
+        #    guest_file = Path(info['guest']['file']).resolve()
+        #    ext = guest_file.suffix[1:]
+        #    system.template_lines += [
+        #        f"LIG = load{ext} {guest_file}",
+        #        #f"saveamberparm LIG ligand.prmtop ligand.rst7",
+        #    ]
 
     if has_complex:
         #complex_file = Path(info['complex']['file']).resolve()
@@ -217,7 +226,10 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
 
     else:
         if has_host and has_guest:
-            system.template_lines += [ f"model = combine {{ MOL LIG }}", ]
+            if 'host_pdb' in info['host']:
+                system.template_lines += [ f"model = combine {{ HOST LIG }}", ]
+            else:
+                system.template_lines += [ f"model = combine {{ MOL LIG }}", ]
         elif has_host:
             system.template_lines += [ f"model = combine {{ MOL }}", ]
         else:
@@ -231,7 +243,7 @@ def build(info, complex_pdb, system_path, system_top, system_rst, system_pdb, du
 
     if has_host:
         system.template_lines += [ f"saveamberparm MOL receptor.prmtop receptor.rst7", ]
-    if has_guest:
+    if has_guest and info['guest']['par_path'] != 'None':
         system.template_lines += [ f"saveamberparm LIG ligand.prmtop ligand.rst7", ]
 
     system.build(clean_files=False)
@@ -294,6 +306,7 @@ def solvate(info, complex_pdb, complex_dir, system_path, system_prefix, num_wate
         "check model",
     ]
 
+    system.manual_switch_thresh=10
     system.build(clean_files=False)
     system.repartition_hydrogen_mass()
 
@@ -316,6 +329,9 @@ def get_mol2block(mol2file):
 def match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2'):
     host_gaff_mol2 = host.parent/gaff/f'{host.stem}.{gaff}.mol2'
     guest_gaff_mol2 = guest.parent/gaff/f'{guest.stem}.{gaff}.mol2'
+    guest_gaff_mol2x = guest.parent/gaff/f'{guest.stem}.{gaff}.mol2x'
+    if guest_gaff_mol2x.exists():
+        guest_gaff_mol2 = guest_gaff_mol2x
     host_m = Chem.MolFromMol2Block(get_mol2block(host_gaff_mol2), removeHs=False)
     guest_m = Chem.MolFromMol2Block(get_mol2block(guest_gaff_mol2), removeHs=False)
     complex_m = Chem.MolFromPDBFile(str(complex), removeHs=False)
@@ -324,8 +340,8 @@ def match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2'
 
     for mol in mols:
         ps = MCSParameters()
-        host_mcs = FindMCS([host_m, mol], ps)
-        guest_mcs = FindMCS([guest_m, mol], ps)
+        host_mcs = FindMCS([host_m, mol], completeRingsOnly=True)
+        guest_mcs = FindMCS([guest_m, mol])
 
         host_aids = host_m.GetSubstructMatch(host_mcs.queryMol)
         guest_aids = guest_m.GetSubstructMatch(guest_mcs.queryMol)
@@ -341,9 +357,10 @@ def match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2'
         if is_host:
             if len(target_aids) < len(mol.GetAtoms()):
                 print("some atom names are not matched; expand MCS for matching any bond order")
-                mcs = FindMCS([host_m, mol], bondCompare=BondCompare.CompareAny)
+                mcs = FindMCS([host_m, mol])
                 _aids = host_m.GetSubstructMatch(mcs.queryMol)
                 target_aids = mol.GetSubstructMatch(mcs.queryMol)
+                print(len(target_aids), len(mol.GetAtoms()))
         
             atomnames = parse_mol2_atomnames(host_gaff_mol2)
             for aid1, aid2 in zip(host_aids, target_aids):
@@ -400,12 +417,15 @@ def init(args):
             'top': str(host_top),
         }
 
+        if args.host_pdb:
+            info['host']['host_pdb'] = Path(args.host_pdb)
+
     if args.guest:
         logger.info('preparing guest parameters')
         guest = Path(args.guest)
 
         guestname = guest.stem
-        if guestname.upper() == 'CHL' and 0:
+        if guestname.upper() == 'CHL':
             guest_par_path = None
             guest_top = None
         else:
@@ -455,6 +475,10 @@ def init(args):
         'pdb': str(system_pdb),
         'rst': str(system_rst),
     }
+
+    structure = pmd.load_file('complex/vac.prmtop', 'complex/vac.rst7', structure=True)
+    parmed.tools.actions.HMassRepartition(structure).execute()
+    structure.save('complex/vac.prmtop', overwrite=True)
 
     structure = pmd.load_file('complex/vac.prmtop', 'complex/vac.rst7', structure=True)
 

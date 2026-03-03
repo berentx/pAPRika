@@ -21,9 +21,11 @@ def main():
     parser_init = subparsers.add_parser('init', help='init help')
     parser_init.add_argument('--config', help='config file')
     parser_init.add_argument('--host', help='host mol2 file')
+    parser_init.add_argument('--host_pdb', help='host pdb file')
     parser_init.add_argument('--guest', help='guest mol2 file')
     parser_init.add_argument('--complex', help='complex PDB file')
     parser_init.add_argument('--nrep', type=int, default=1, help='number of replicas')
+    parser_init.add_argument('--nhost', type=int, default=1, help='copy host')
     parser_init.add_argument('--copy', type=int, default=1, help='copy solutes')
     parser_init.add_argument('--implicit', action='store_true', help='use implicit solvent (default: explicit solvent)')
     parser_init.add_argument('--overwrite', action='store_true', help='force overwrite')
@@ -37,6 +39,7 @@ def main():
     parser_run.add_argument('--ns', type=float, default=1)
     parser_run.add_argument('--temp', type=float, default=300)
     parser_run.add_argument('--extend', action='store_true')
+    parser_run.add_argument('--dcd_freq', type=int, default=50000, help='DCD frame write interval in steps (default: 50000 = 200 ps at 4 fs timestep)')
     parser_run.set_defaults(func=run)
 
     # create the parser for the "analysis" command
