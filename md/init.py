@@ -318,7 +318,11 @@ def get_mol2block(mol2file):
             _in = False
         if _in:
             atomname = line.split()[1]
-            element = re.sub(r'\d+', '', atomname)
+            # keep two-letter elements (Cl, Br, Na, etc.), otherwise take first char
+            if len(atomname) >= 2 and atomname[0].isalpha() and atomname[1].islower():
+                element = atomname[:2]
+            else:
+                element = atomname[0]
             line = line[:50] + f'{element:11s}' + line[61:]
         if line.startswith("@<TRIPOS>ATOM"):
             _in = True
@@ -357,11 +361,16 @@ def match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2'
         if is_host:
             if len(target_aids) < len(mol.GetAtoms()):
                 print("some atom names are not matched; expand MCS for matching any bond order")
-                mcs = FindMCS([host_m, mol])
-                _aids = host_m.GetSubstructMatch(mcs.queryMol)
+                mcs = FindMCS([host_m, mol], bondCompare=BondCompare.CompareAny)
+                host_aids = host_m.GetSubstructMatch(mcs.queryMol)
                 target_aids = mol.GetSubstructMatch(mcs.queryMol)
                 print(len(target_aids), len(mol.GetAtoms()))
-        
+                unmatched = set(range(mol.GetNumAtoms())) - set(target_aids)
+                for idx in unmatched:
+                    a = mol.GetAtomWithIdx(idx)
+                    info = a.GetPDBResidueInfo()
+                    print(f"  unmatched host atom: idx={idx} name={info.GetName().strip() if info else '?'} symbol={a.GetSymbol()}")
+
             atomnames = parse_mol2_atomnames(host_gaff_mol2)
             for aid1, aid2 in zip(host_aids, target_aids):
                 a1 = host_m.GetAtomWithIdx(aid1)
@@ -375,6 +384,11 @@ def match_host_atomnames(host, guest, complex, matched_complex_pdb, gaff='gaff2'
                 mcs = FindMCS([guest_m, mol], bondCompare=BondCompare.CompareAny)
                 guest_aids = guest_m.GetSubstructMatch(mcs.queryMol)
                 target_aids = mol.GetSubstructMatch(mcs.queryMol)
+                unmatched = set(range(mol.GetNumAtoms())) - set(target_aids)
+                for idx in unmatched:
+                    a = mol.GetAtomWithIdx(idx)
+                    info = a.GetPDBResidueInfo()
+                    print(f"  unmatched guest atom: idx={idx} name={info.GetName().strip() if info else '?'} symbol={a.GetSymbol()}")
         
             atomnames = parse_mol2_atomnames(guest_gaff_mol2)
             for aid1, aid2 in zip(guest_aids, target_aids):
@@ -425,14 +439,11 @@ def init(args):
         guest = Path(args.guest)
 
         guestname = guest.stem
-        if guestname.upper() == 'CHL':
-            guest_par_path = None
-            guest_top = None
-        else:
-            guest_par_path = guest.parent/'gaff2'
-            guest_top = guest_par_path/f'{guestname}.prmtop'
-            if not guest_top.exists():
-                antechamber(guest, guest.suffix[1:], guest_par_path, overwrite=args.overwrite)
+        guest_par_path = guest.parent/'gaff2'
+        guest_top = guest_par_path/f'{guestname}.prmtop'
+        guest_mol2 = guest_par_path/f'{guestname}.gaff2.mol2'
+        if not guest_mol2.exists():
+            antechamber(guest, guest.suffix[1:], guest_par_path, overwrite=args.overwrite)
 
         info['guest'] = {
             'name': guestname,

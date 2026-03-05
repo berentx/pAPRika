@@ -48,6 +48,11 @@ def main():
     parser_analysis.set_defaults(func=analysis)
 
     args = parser.parse_args()
+
+    if not hasattr(args, 'func'):
+        parser.print_help()
+        return
+
     if args.verbose:
         logging.basicConfig(level=logging.DEBUG)
 
