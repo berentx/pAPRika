@@ -29,6 +29,7 @@ def main():
     parser_init.add_argument('--copy', type=int, default=1, help='copy solutes')
     parser_init.add_argument('--implicit', action='store_true', help='use implicit solvent (default: explicit solvent)')
     parser_init.add_argument('--overwrite', action='store_true', help='force overwrite')
+    parser_init.add_argument('--fragment', action='store_true', help='use fragment-based charge assignment for host (e.g. cyclodextrin)')
     parser_init.add_argument('--conc', type=float, default=50.0, help="ion concentration (mM)")
     parser_init.add_argument('--nwater', type=int, default=1000)
     parser_init.set_defaults(func=init)

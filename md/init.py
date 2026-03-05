@@ -104,6 +104,35 @@ def antechamber(input, format, output_path, pl=-1, overwrite=False):
     os.chdir(cwd)
 
 
+def antechamber_fragment(input, format, output_path, overwrite=False):
+    from paprika.build.system.fragmenter import CyclodextrinFragmenter
+
+    output_mol2 = output_path / f'{input.stem}.gaff2.mol2'
+    output_frcmod = output_path / f'{input.stem}.frcmod'
+    input_path = input.resolve()
+
+    if not output_path.exists():
+        output_path.mkdir(parents=True)
+
+    if not output_mol2.exists() or overwrite:
+        if format == 'sdf':
+            mol = Chem.MolFromMolFile(str(input_path), removeHs=False)
+        elif format == 'mol2':
+            mol = Chem.MolFromMol2File(str(input_path), removeHs=False)
+
+        fragmenter = CyclodextrinFragmenter(mol)
+        fragmenter.parametrize(
+            output_mol2=str(output_mol2),
+            output_frcmod=str(output_frcmod),
+            atom_type='gaff2',
+            charge_method='bcc',
+            work_dir=str(output_path),
+        )
+
+    assert output_mol2.exists()
+    assert output_frcmod.exists()
+
+
 def duplicate_structures(original, copies):
     n_copies = len(copies.residues) / len(original.residues)
     n_atoms = len(original.atoms)
@@ -422,7 +451,10 @@ def init(args):
         host_par_path = host.parent/'gaff2'
         host_top = host_par_path/f'{hostname}.prmtop'
         if not host_top.exists():
-            antechamber(host, host.suffix[1:], host_par_path, 10, args.overwrite)
+            if getattr(args, 'fragment', False):
+                antechamber_fragment(host, host.suffix[1:], host_par_path, args.overwrite)
+            else:
+                antechamber(host, host.suffix[1:], host_par_path, 10, args.overwrite)
     
         info['host'] = {
             'name': hostname,
