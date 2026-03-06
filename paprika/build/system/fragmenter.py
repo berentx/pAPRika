@@ -216,6 +216,10 @@ class CyclodextrinFragmenter:
         work_dir: str
             Working directory for temporary files
         """
+        work_dir = os.path.abspath(work_dir)
+        output_mol2 = os.path.abspath(output_mol2)
+        output_frcmod = os.path.abspath(output_frcmod)
+
         self._get_capped_monomer()
 
         # Per-fragment: {frag_atom_idx: (atom_type_str, charge_float)}
@@ -342,6 +346,27 @@ class CyclodextrinFragmenter:
                 atom.charge = charge_map[orig_idx]
 
         structure.save(output_mol2, overwrite=True)
+
+        # Normalize to standard antechamber mol2 column format so downstream
+        # tools (e.g. RDKit MolFromMol2Block) can parse it reliably.
+        norm_mol2 = output_mol2 + ".norm.mol2"
+        subprocess.run(
+            [
+                "antechamber",
+                "-fi", "mol2",
+                "-fo", "mol2",
+                "-i", output_mol2,
+                "-o", norm_mol2,
+                "-at", atom_type,
+                "-rn", residue_name,
+                "-pf", "y",
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=work_dir,
+        )
+        os.replace(norm_mol2, output_mol2)
 
         subprocess.run(
             [

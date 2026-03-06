@@ -124,6 +124,7 @@ def antechamber_fragment(input, format, output_path, overwrite=False):
         fragmenter.parametrize(
             output_mol2=str(output_mol2),
             output_frcmod=str(output_frcmod),
+            residue_name='MOL',
             atom_type='gaff2',
             charge_method='bcc',
             work_dir=str(output_path),
