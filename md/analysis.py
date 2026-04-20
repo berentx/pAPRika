@@ -74,9 +74,12 @@ def analysis(args):
     traj_dir = [d for d in Path('windows').glob('*') if d.is_dir()]
 
     for d in traj_dir:
+        dcd_files = sorted(d.glob('production.*.dcd'))
+        if not dcd_files:
+            continue
         traj = {
             'system_path': str(d/'system.pdb'),
-            'traj_path': str(d/'production.dcd')
+            'traj_path': [str(f) for f in dcd_files],
         }
         traj_specs.append(traj)
 

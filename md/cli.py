@@ -38,8 +38,8 @@ def main():
     parser_run = subparsers.add_parser('run', help='run help', parents=[parser])
     parser_run.add_argument('--implicit', action='store_true', help='use implicit solvent (default: explicit solvent)')
     parser_run.add_argument('--ns', type=float, default=1)
+    parser_run.add_argument('--chunk', type=float, default=10, help='chunk size in ns per trajectory file (default: 10 ns)')
     parser_run.add_argument('--temp', type=float, default=300)
-    parser_run.add_argument('--extend', action='store_true')
     parser_run.add_argument('--dcd_freq', type=int, default=50000, help='DCD frame write interval in steps (default: 50000 = 200 ps at 4 fs timestep)')
     parser_run.set_defaults(func=run)
 
